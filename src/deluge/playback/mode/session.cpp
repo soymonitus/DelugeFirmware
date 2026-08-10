@@ -25,6 +25,7 @@
 #include "gui/views/session_view.h"
 #include "gui/views/view.h"
 #include "io/debug/log.h"
+#include "io/midi/midi_follow.h"
 #include "model/action/action.h"
 #include "model/action/action_logger.h"
 #include "model/clip/clip_instance.h"
@@ -735,6 +736,7 @@ doNormalLaunch:
 	}
 
 	AudioEngine::bypassCulling = true;
+	midiFollow.sendTrackMuteSoloFeedback();
 }
 
 void Session::justAbortedSomeLinearRecording() {
@@ -1151,6 +1153,7 @@ void Session::toggleClipStatus(Clip* clip, int32_t* clipIndex, bool doInstant, i
 	}
 
 	armingChanged();
+	midiFollow.sendTrackMuteSoloFeedback();
 }
 
 // Beware - calling this might insert a Clip!
@@ -1207,6 +1210,7 @@ void Session::soloClipAction(Clip* clip, bool doInstant, int32_t buttonPressLate
 	armingChanged();
 
 renderAndGetOut:
+	midiFollow.sendTrackMuteSoloFeedback();
 	if (anyClipsDeleted) {
 		sessionView.requestRendering(getRootUI());
 	}
@@ -1291,6 +1295,7 @@ void Session::armSectionWhenNeitherClockActive(ModelStack* modelStack, int32_t s
 			clip->activeIfNoSolo = false;
 		}
 	}
+	midiFollow.sendTrackMuteSoloFeedback();
 }
 
 // Updates LEDs after arming changed
@@ -2549,6 +2554,7 @@ void Session::unsoloClip(Clip* clip) {
 	currentSong->reassessWhetherAnyClipsSoloing();
 
 	if (!hasPlaybackActive()) {
+		midiFollow.sendTrackMuteSoloFeedback();
 		return;
 	}
 
@@ -2593,6 +2599,7 @@ void Session::unsoloClip(Clip* clip) {
 			}
 		}
 	}
+	midiFollow.sendTrackMuteSoloFeedback();
 }
 
 void Session::soloClipRightNow(ModelStackWithTimelineCounter* modelStack) {
@@ -2650,6 +2657,7 @@ doAssertThisClip:
 		modelStack->song->assertActiveness(modelStack);
 		// pos will get set by the caller if necessary
 	}
+	midiFollow.sendTrackMuteSoloFeedback();
 }
 
 bool Session::isOutputAvailable(Output* output) {
