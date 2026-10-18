@@ -137,10 +137,11 @@ void String::set(String const* otherString) {
 		D_PRINTLN("setting string to itself");
 		return;
 	}
-#if ALPHA_OR_BETA_VERSION
-	// if the other string has memory and it's not in the non audio region
+	// if the other string has memory and it's not in the external regions, which allocExternal() allocates it from.
+	// Sharing it would have beenCloned() write a reason count into memory we don't own
 	if (sm != nullptr) {
-		if (!(EXTERNAL_MEMORY_END - RESERVED_EXTERNAL_ALLOCATOR < (uint32_t)sm && (uint32_t)sm < EXTERNAL_MEMORY_END)) {
+		int32_t region = GeneralMemoryAllocator::get().getRegion(sm);
+		if (region != MEMORY_REGION_EXTERNAL && region != MEMORY_REGION_EXTERNAL_SMALL) {
 			FREEZE_WITH_ERROR("S001");
 			return;
 		}
@@ -150,7 +151,6 @@ void String::set(String const* otherString) {
 			return;
 		}
 	}
-#endif
 	otherString->beenCloned();
 
 	clear();

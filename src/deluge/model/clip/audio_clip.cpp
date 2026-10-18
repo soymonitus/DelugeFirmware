@@ -37,6 +37,7 @@
 #include "playback/playback_handler.h"
 #include "processing/audio_output.h"
 #include "processing/engines/audio_engine.h"
+#include "storage/audio/audio_file_manager.h"
 #include "storage/storage_manager.h"
 #include "util/fixedpoint.h"
 #include <new>
@@ -276,11 +277,16 @@ ramError:
 		goto ramError;
 	}
 
-#if ALPHA_OR_BETA_VERSION
+	// A Clip without param collections would crash as soon as its params are accessed, so treat it like the failure
+	// above in all builds.
 	if (!newClip->paramManager.summaries[0].paramCollection) {
-		FREEZE_WITH_ERROR("E421"); // Trying to diversify Leo's E410
+		if constexpr (ALPHA_OR_BETA_VERSION) {
+			FREEZE_WITH_ERROR("E421"); // Trying to diversify Leo's E410
+		}
+		newClip->~AudioClip();
+		delugeDealloc(clipMemory);
+		goto ramError;
 	}
-#endif
 
 	return newClip;
 }
@@ -421,9 +427,10 @@ doUnassignment:
 
 			setupPlaybackBounds();
 
-			voiceSample->noteOn(&guide, 0, 1);
+			voiceSample->noteOn(&guide, 0, getClusterPriority());
 			voiceSample->forAudioClip = true;
-			voiceSample->setupClusersForInitialPlay(&guide, ((Sample*)sampleHolder.audioFile), 0, false, 1);
+			voiceSample->setupClusersForInitialPlay(&guide, ((Sample*)sampleHolder.audioFile), 0, false,
+			                                        getClusterPriority());
 
 possiblyResetEnvelopeAndGetOut:
 			if (shouldResetEnvelope) {
@@ -449,7 +456,7 @@ void AudioClip::resumePlayback(ModelStackWithTimelineCounter* modelStack, bool m
 	// If reading or writing cache, that's not gonna be valid now that we've moved our play position, so gotta stop
 	// that.
 	if (voiceSample && voiceSample->cache) {
-		int32_t priorityRating = 1;
+		int32_t priorityRating = getClusterPriority();
 		bool success = voiceSample->stopUsingCache(&guide, ((Sample*)sampleHolder.audioFile), priorityRating,
 		                                           getLoopingType(modelStack) == LoopType::LOW_LEVEL);
 		if (!success) {
@@ -513,7 +520,7 @@ void AudioClip::resumePlayback(ModelStackWithTimelineCounter* modelStack, bool m
 			return;
 		}
 
-		voiceSample->noteOn(&guide, 0, 1);
+		voiceSample->noteOn(&guide, 0, getClusterPriority());
 		voiceSample->forAudioClip = true;
 		((AudioOutput*)output)->resetEnvelope();
 	}
@@ -530,7 +537,7 @@ void AudioClip::setupPlaybackBounds() {
 void AudioClip::sampleZoneChanged(ModelStackWithTimelineCounter const* modelStack) {
 	if (voiceSample) {
 
-		int32_t priorityRating = 1; // probably better fix this...
+		int32_t priorityRating = getClusterPriority();
 
 		voiceSample->sampleZoneChanged(&guide, ((Sample*)sampleHolder.audioFile), sampleControls.isCurrentlyReversed(),
 		                               MarkerType::END, getLoopingType(modelStack), priorityRating, true);
@@ -563,7 +570,8 @@ void AudioClip::render(ModelStackWithTimelineCounter* modelStack, std::span<q31_
 	if (doingLateStart && static_cast<AudioOutput*>(this->output)->envelope.state < EnvelopeStage::FAST_RELEASE) {
 		uint64_t numSamplesIn = guide.getSyncedNumSamplesIn();
 
-		LateStartAttemptStatus result = voiceSample->attemptLateSampleStart(&guide, sample, numSamplesIn);
+		LateStartAttemptStatus result =
+		    voiceSample->attemptLateSampleStart(&guide, sample, numSamplesIn, getClusterPriority());
 		if (result != LateStartAttemptStatus::SUCCESS) {
 			if (result == LateStartAttemptStatus::FAILURE) {
 				unassignVoiceSample(false);
@@ -602,8 +610,13 @@ void AudioClip::render(ModelStackWithTimelineCounter* modelStack, std::span<q31_
 			timeStretchRatio = ((uint64_t)timeStretchRatio << 24) / (uint32_t)phaseIncrement;
 		}
 
+		// If only the file's sample rate is changing phaseIncrement, playing it back at that speed already keeps it in
+		// time, so like an unadjusted 44100kHz file, it doesn't need time-stretching unless it's drifted out of sync.
+		// Otherwise every non-44100kHz file would always be time-stretched, even at its original tempo.
+		bool pitchManuallyAdjusted = pitchAdjust != kMaxSampleValue || sampleHolder.transpose || sampleHolder.cents;
+
 		// Or if no manual pitch adjustment...
-		else {
+		if (phaseIncrement == kMaxSampleValue || !pitchManuallyAdjusted) {
 
 			// If we'd only be time-stretching a tiiiny bit (+/- 1 cent)...
 			if (timeStretchRatio >= 16661327 && timeStretchRatio < 16893911) {
@@ -656,7 +669,7 @@ justDontTimeStretch:
 		}
 	}
 
-	int32_t priorityRating = 1;
+	int32_t priorityRating = getClusterPriority();
 
 	bool clipWillLoopAtEnd = playbackHandler.playbackState && currentPlaybackMode->willClipLoopAtSomePoint(modelStack);
 	// I don't love that this is being called for every AudioClip at every render. This is to determine the "looping"
@@ -756,7 +769,7 @@ justDontTimeStretch:
 		// We tell the cache setup that we're *not* looping.
 		// We want it to think this, otherwise problems if we've put the end point after the actual waveform end.
 		bool everythingOk = voiceSample->possiblySetUpCache(&sampleControls, &guide, phaseIncrement, timeStretchRatio,
-		                                                    1, LoopType::NONE);
+		                                                    priorityRating, LoopType::NONE);
 		if (!everythingOk) {
 			goto doUnassign;
 		}
@@ -768,13 +781,53 @@ justDontTimeStretch:
 		stillActive = voiceSample->render(&guide, outputBuffer.data(), outputBuffer.size(), sample, sample->numChannels,
 		                                  loopingType, phaseIncrement, timeStretchRatio, amplitude, amplitudeIncrement,
 		                                  sampleControls.getInterpolationBufferSize(phaseIncrement),
-		                                  sampleControls.interpolationMode, 1);
+		                                  sampleControls.interpolationMode, priorityRating);
 	}
 
 	if (!stillActive) {
 doUnassign:
 		unassignVoiceSample(false);
 	}
+	else {
+		prefetchClustersAhead(sample);
+	}
+}
+
+// The VoiceSample holds reasons on the Clusters it's about to play, but only enqueues each one as playback reaches the
+// one before, which on a slow card can be too late. So have the AudioFileManager hold a few more beyond those, until
+// the VoiceSample gets to them and holds them itself.
+void AudioClip::prefetchClustersAhead(Sample* sample) {
+	Cluster* furthestCluster = nullptr;
+	for (Cluster* cluster : voiceSample->clusters) {
+		if (cluster != nullptr) {
+			audioFileManager.claimPrefetch(cluster);
+			furthestCluster = cluster;
+		}
+	}
+	if (furthestCluster == nullptr) {
+		return;
+	}
+
+	// While recording, Clusters past what's been written aren't on the card yet
+	if (recorder != nullptr) {
+		return;
+	}
+
+	int32_t finalClusterIndex = guide.getFinalClusterIndex(sample, voiceSample->shouldObeyMarkers());
+	int32_t clusterIndex = furthestCluster->clusterIndex;
+
+	for (int32_t i = 0; i < kNumClustersPrefetchedForAudioClip; i++) {
+		clusterIndex += guide.playDirection;
+		if (clusterIndex * guide.playDirection > finalClusterIndex * guide.playDirection || clusterIndex < 0
+		    || clusterIndex >= sample->clusters.getNumElements()) {
+			break;
+		}
+		audioFileManager.prefetchCluster(sample, clusterIndex);
+	}
+}
+
+int32_t AudioClip::getClusterPriority() const {
+	return static_cast<int32_t>(ClusterPriority::forAudioClip(voicePriority));
 }
 
 // Returns the "looping" parameter that gets passed into a lot of functions.
@@ -803,6 +856,10 @@ LoopType AudioClip::getLoopingType(ModelStackWithTimelineCounter const* modelSta
 
 void AudioClip::unassignVoiceSample(bool wontBeUsedAgain) {
 	if (voiceSample) {
+		// Whatever we'd prefetched may no longer be what's played next
+		if (sampleHolder.audioFile != nullptr) {
+			audioFileManager.releasePrefetchesForSample(static_cast<Sample*>(sampleHolder.audioFile));
+		}
 		voiceSample->beenUnassigned(wontBeUsedAgain);
 		AudioEngine::voiceSampleUnassigned(voiceSample);
 		voiceSample = nullptr;
@@ -1003,7 +1060,7 @@ void AudioClip::getScrollAndZoomInSamples(int32_t xScroll, int32_t xZoom, int64_
 	}
 }
 
-// Returns false if can't because in card routine
+// Returns false if some of the waveform is still waiting on the card, so the row should be rendered again later
 bool AudioClip::renderAsSingleRow(ModelStackWithTimelineCounter* modelStack, TimelineView* editorScreen,
                                   int32_t xScroll, uint32_t xZoom, RGB* image, uint8_t occupancyMask[],
                                   bool addUndefinedArea, int32_t noteRowIndexStart, int32_t noteRowIndexEnd,
@@ -1020,6 +1077,8 @@ bool AudioClip::renderAsSingleRow(ModelStackWithTimelineCounter* modelStack, Tim
 		sample = ((Sample*)sampleHolder.audioFile);
 	}
 
+	bool success = true;
+
 	if (sample) {
 
 		int64_t xScrollSamples;
@@ -1029,14 +1088,8 @@ bool AudioClip::renderAsSingleRow(ModelStackWithTimelineCounter* modelStack, Tim
 
 		RGB rgb = getColour();
 
-		bool success =
-		    waveformRenderer.renderAsSingleRow(sample, xScrollSamples, xZoomSamples, image, &renderData, recorder, rgb,
-		                                       sampleControls.isCurrentlyReversed(), xStart, xEnd);
-
-		if (!success) {
-			// If card being accessed and waveform would have to be re-examined, come back later
-			return false;
-		}
+		success = waveformRenderer.renderAsSingleRow(sample, xScrollSamples, xZoomSamples, image, &renderData, recorder,
+		                                             rgb, sampleControls.isCurrentlyReversed(), xStart, xEnd);
 	}
 
 	else {
@@ -1048,7 +1101,7 @@ bool AudioClip::renderAsSingleRow(ModelStackWithTimelineCounter* modelStack, Tim
 		drawUndefinedArea(xScroll, xZoom, loopLength, image, occupancyMask, kDisplayWidth, editorScreen, false);
 	}
 
-	return true;
+	return success;
 }
 
 void AudioClip::writeDataToFile(Serializer& writer, Song* song) {
@@ -1090,7 +1143,6 @@ void AudioClip::writeDataToFile(Serializer& writer, Song* song) {
 		writer.writeAttribute("lastSelectedParamArrayPosition", lastSelectedParamArrayPosition);
 	}
 
-	Clip::writeDataToFile(writer, song);
 	Clip::writeDataToFile(writer, song);
 
 	writer.writeOpeningTagEnd();
@@ -1231,7 +1283,12 @@ Error AudioClip::claimOutput(ModelStackWithTimelineCounter* modelStack) {
 void AudioClip::loadSample(bool mayActuallyReadFile) {
 	Error error = sampleHolder.loadFile(sampleControls.isCurrentlyReversed(), false, mayActuallyReadFile);
 
-	name.set(sampleHolder.filePath.get());
+	// if we have an audio clip name, don't replace it with the sample file path
+	if (name.isEmpty()) {
+		// we don't have an audio clip name, so set the sample file path
+		name.set(sampleHolder.filePath.get());
+	}
+
 	if (error != Error::NONE) {
 		display->displayError(error);
 	}

@@ -111,10 +111,14 @@ void VoiceSample::setupCacheLoopPoints(SamplePlaybackGuide* guide, Sample* sampl
 
 		cacheEndPointBytes = endPointCombinedIncrements * kCacheByteDepth * sample->numChannels;
 
-		if (ALPHA_OR_BETA_VERSION && cacheEndPointBytes > cache->waveformLengthBytes) {
+		if (cacheEndPointBytes > cache->waveformLengthBytes) {
 			D_PRINTLN("%d", cacheEndPointBytes);
 			D_PRINTLN("%d", cache->waveformLengthBytes);
-			FREEZE_WITH_ERROR("E128");
+			if (ALPHA_OR_BETA_VERSION) {
+				FREEZE_WITH_ERROR("E128");
+			}
+			// Clamp, or cache writing would run past the end of the cache's Cluster array
+			cacheEndPointBytes = cache->waveformLengthBytes;
 		}
 	}
 
@@ -161,7 +165,8 @@ void VoiceSample::setupCacheLoopPoints(SamplePlaybackGuide* guide, Sample* sampl
 
 // Returns a status such as LateStartAttemptStatus::WAIT
 LateStartAttemptStatus VoiceSample::attemptLateSampleStart(SamplePlaybackGuide* voiceSource, Sample* sample,
-                                                           int64_t rawSamplesSinceStart, int32_t numSamples) {
+                                                           int64_t rawSamplesSinceStart, int32_t priorityRating,
+                                                           int32_t numSamples) {
 
 	int32_t bytesPerSample = sample->numChannels * sample->byteDepth;
 
@@ -198,7 +203,8 @@ LateStartAttemptStatus VoiceSample::attemptLateSampleStart(SamplePlaybackGuide* 
 	for (int32_t l = 0; l < kNumClustersLoadedAhead; l++) {
 
 		// Grab it.
-		newClusters[l] = sample->clusters.getElement(clusterIndex)->getCluster(sample, clusterIndex, CLUSTER_ENQUEUE);
+		newClusters[l] = sample->clusters.getElement(clusterIndex)
+		                     ->getCluster(sample, clusterIndex, CLUSTER_ENQUEUE, priorityRating);
 
 		// If failure (would only happen in insanely rare case where there's no free RAM)
 		if (l == 0 && !newClusters[l]) {
@@ -342,7 +348,7 @@ bool VoiceSample::weShouldBeTimeStretchingNow(Sample* sample, SamplePlaybackGuid
 
 	if (timeStretchRatio != kMaxSampleValue) {
 		sample->fillPercCache(timeStretcher, playSample, playSample + (phaseIncrement >> 10) * playDirection,
-		                      playDirection, maxNumSamplesToProcess);
+		                      playDirection, maxNumSamplesToProcess, priorityRating);
 	}
 
 	return true;
@@ -697,8 +703,11 @@ readCachedWindow:
 		}
 
 		// This shouldn't happen - it gets checked for up at the start
-		else if (ALPHA_OR_BETA_VERSION && bytesTilCacheEnd < 0) {
-			FREEZE_WITH_ERROR("E164");
+		else if (bytesTilCacheEnd < 0) {
+			if (ALPHA_OR_BETA_VERSION) {
+				FREEZE_WITH_ERROR("E164");
+			}
+			return false; // Would otherwise read past the end of the cache Cluster
 		}
 
 		int32_t cachedClusterIndex = cacheBytePos >> Cluster::size_magnitude;
@@ -843,7 +852,7 @@ readCachedWindow:
 				int32_t nextUncachedClusterIndex = uncachedClusterIndex;
 				for (int32_t l = 0; l < kNumClustersLoadedAhead; l++) {
 					clusters[l] = sample->clusters.getElement(nextUncachedClusterIndex)
-					                  ->getCluster(sample, nextUncachedClusterIndex, CLUSTER_ENQUEUE);
+					                  ->getCluster(sample, nextUncachedClusterIndex, CLUSTER_ENQUEUE, priorityRating);
 					if (!clusters[l]) {
 						break;
 					}
@@ -967,9 +976,7 @@ uncachedPlaybackNotWriting:
 			if (timeStretcher && !guide->sequenceSyncLengthTicks) {
 				int32_t reassessmentPos = guide->getBytePosToEndOrLoopPlayback();
 
-#if ALPHA_OR_BETA_VERSION
 				int32_t count = 0;
-#endif
 
 				// Do quick check before we commit to a divide operation
 				int64_t combinedIncrementingThisUncachedRead = combinedIncrement * numSamplesThisUncachedRead;
@@ -1022,12 +1029,13 @@ assessLoopPointAgainTimestretched:
 							                      timeStretchRatio, phaseIncrement, combinedIncrement, playDirection,
 							                      loopingType, priorityRating);
 
-#if ALPHA_OR_BETA_VERSION
+							// Without this bound, a tiny loop at an extreme stretch could hang the audio routine
+							// forever
 							if (count >= 1024) {
 								FREEZE_WITH_ERROR("E169");
+								return false;
 							}
 							count++;
-#endif
 							goto assessLoopPointAgainTimestretched;
 						}
 
@@ -1043,10 +1051,11 @@ assessLoopPointAgainTimestretched:
 						int32_t combinedIncrementsLeft =
 						    (uint64_t)combinedIncrementingLeftToDoAbsolute / combinedIncrement;
 						if (ALPHA_OR_BETA_VERSION && combinedIncrementsLeft > numSamplesThisUncachedRead) {
-							D_PRINTLN((const char*)combinedIncrementsLeft);
+							D_PRINTLN("combinedIncrementsLeft: %d", combinedIncrementsLeft);
 							FREEZE_WITH_ERROR("E151");
 						}
-						numSamplesThisUncachedRead = combinedIncrementsLeft;
+						// Only ever shorten - lengthening would overrun the output buffer
+						numSamplesThisUncachedRead = std::min(numSamplesThisUncachedRead, combinedIncrementsLeft);
 					}
 				}
 			}
