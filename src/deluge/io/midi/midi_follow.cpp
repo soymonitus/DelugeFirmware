@@ -1491,9 +1491,9 @@ void MidiFollow::sendTrackMuteSoloFeedback(bool force) {
 	lastTrackFeedbackSoloMask = soloMask;
 	trackMuteSoloFeedbackInitialized = true;
 
-	sendLaunchControlXLBank(MIDIDeviceManager::upstreamUSBMIDICable2, 0, configuredMask, existingMask, activeMask,
+	sendLaunchControlXLBank(MIDIDeviceManager::upstreamUSBMIDICable3, 0, configuredMask, existingMask, activeMask,
 	                        soloMask);
-	sendLaunchControlXLBank(MIDIDeviceManager::upstreamUSBMIDICable3, 8, configuredMask, existingMask, activeMask,
+	sendLaunchControlXLBank(MIDIDeviceManager::upstreamUSBMIDICable4, 8, configuredMask, existingMask, activeMask,
 	                        soloMask);
 }
 
