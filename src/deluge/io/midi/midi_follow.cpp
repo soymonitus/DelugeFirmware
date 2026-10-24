@@ -16,8 +16,10 @@
  */
 
 #include "io/midi/midi_follow.h"
+#include "OSLikeStuff/scheduler_api.h"
 #include "definitions_cxx.hpp"
 #include "gui/l10n/l10n.h"
+#include "gui/ui/load/load_song_ui.h"
 #include "gui/views/arranger_view.h"
 #include "gui/views/automation_view.h"
 #include "gui/views/instrument_clip_view.h"
@@ -26,6 +28,7 @@
 #include "gui/views/view.h"
 #include "hid/display/display.h"
 #include "io/midi/midi_device.h"
+#include "io/midi/midi_device_manager.h"
 #include "io/midi/midi_engine.h"
 #include "io/midi/midi_takeover.h"
 #include "model/clip/clip_instance.h"
@@ -150,6 +153,11 @@ void MidiFollow::initState() {
 	}
 
 	timeAutomationFeedbackLastSent = 0;
+	lastTrackFeedbackConfiguredMask = 0;
+	lastTrackFeedbackExistingMask = 0;
+	lastTrackFeedbackActiveMask = 0;
+	lastTrackFeedbackSoloMask = 0;
+	trackMuteSoloFeedbackInitialized = false;
 }
 
 void MidiFollow::clearMappings() {
@@ -1392,6 +1400,128 @@ void MidiFollow::sendCCForMidiFollowFeedback(MIDIFollowChannelType feedbackChann
 	midiEngine.sendCC(this, channel, ccNumber, knobPos + kKnobPosOffset, midiOutputFilter);
 
 	timeLastCCSent[ccNumber] = AudioEngine::audioSampleTimer;
+}
+
+void MidiFollow::sendLaunchControlXLBank(MIDICable& cable, uint8_t firstTrack, uint8_t templateIndex,
+                                         uint16_t configuredMask, uint16_t existingMask, uint16_t activeMask,
+                                         uint16_t soloMask) {
+	// F0 00 20 29 02 11 78 <template> [<LED index> <value>]... F7
+	// Each USB virtual cable is routed to one controller. templateIndex is zero-indexed (6 is User Template 7).
+	std::array<uint8_t, 41> message{};
+	size_t position = 0;
+	message[position++] = 0xF0;
+	message[position++] = 0x00;
+	message[position++] = 0x20;
+	message[position++] = 0x29;
+	message[position++] = 0x02;
+	message[position++] = 0x11;
+	message[position++] = 0x78;
+	message[position++] = templateIndex;
+
+	constexpr uint8_t kLedOff = 12;
+	constexpr uint8_t kLedRedLow = 13;
+	constexpr uint8_t kLedGreenHigh = 60;
+	constexpr uint8_t kLedYellowHigh = 62;
+
+	for (uint8_t localTrack = 0; localTrack < 8; localTrack++) {
+		uint8_t track = firstTrack + localTrack;
+		uint16_t trackBit = uint16_t{1} << track;
+		bool available = (configuredMask & trackBit) && (existingMask & trackBit);
+		bool soloed = available && (soloMask & trackBit);
+		uint8_t muteValue = kLedOff;
+		if (available && !soloed) {
+			muteValue = (activeMask & trackBit) ? kLedGreenHigh : kLedRedLow;
+		}
+
+		message[position++] = 24 + localTrack;
+		message[position++] = muteValue;
+		message[position++] = 32 + localTrack;
+		message[position++] = soloed ? kLedYellowHigh : kLedOff;
+	}
+
+	message[position++] = 0xF7;
+	cable.sendSysex(message.data(), position);
+}
+
+void MidiFollow::trackFeedbackChanged() {
+	if (trackFeedbackPending) {
+		return;
+	}
+	// Run as a task rather than now, so it sees the change once it's finished - a song load or clip creation makes
+	// several in a row
+	int8_t const task = addOnceTask(
+	    []() {
+		    midiFollow.trackFeedbackPending = false;
+		    // Partway through a song load, the old song's partly gone. The new one calls this again once it's in
+		    if (loadSongUI.isLoadingSong() && loadSongUI.deletedPartsOfOldSong) {
+			    return;
+		    }
+		    midiFollow.sendTrackMuteSoloFeedback();
+	    },
+	    30, 0.01, "LCXL track feedback", RESOURCE_NONE);
+	trackFeedbackPending = (task >= 0);
+}
+
+void MidiFollow::sendTrackMuteSoloFeedback(bool force) {
+	if (!currentSong) {
+		return;
+	}
+
+	uint16_t configuredMask = 0;
+	uint16_t existingMask = 0;
+	uint16_t activeMask = 0;
+	uint16_t soloMask = 0;
+	uint32_t trackCount = getTrackCount();
+
+	for (uint8_t track = 0; track < kNumMIDIFollowChannelTrackTypes; track++) {
+		auto channelType = kNumMIDIFollowChannelTypes + track;
+		LearnedMIDI& mapping = midiEngine.midiFollowChannelType[channelType];
+		if (mapping.channelOrZone == MIDI_CHANNEL_NONE) {
+			continue;
+		}
+
+		uint16_t trackBit = uint16_t{1} << track;
+		configuredMask |= trackBit;
+
+		Output* output = getTrackFromIndex(track, trackCount);
+		Clip* clip = output ? output->getActiveClip() : nullptr;
+		if (!clip) {
+			continue;
+		}
+
+		existingMask |= trackBit;
+		if (currentSong->isClipActive(clip)) {
+			activeMask |= trackBit;
+		}
+		if (clip->soloingInSessionMode) {
+			soloMask |= trackBit;
+		}
+	}
+
+	if (!force && trackMuteSoloFeedbackInitialized && configuredMask == lastTrackFeedbackConfiguredMask
+	    && existingMask == lastTrackFeedbackExistingMask && activeMask == lastTrackFeedbackActiveMask
+	    && soloMask == lastTrackFeedbackSoloMask) {
+		return;
+	}
+
+	lastTrackFeedbackConfiguredMask = configuredMask;
+	lastTrackFeedbackExistingMask = existingMask;
+	lastTrackFeedbackActiveMask = activeMask;
+	lastTrackFeedbackSoloMask = soloMask;
+	trackMuteSoloFeedbackInitialized = true;
+
+	sendLaunchControlXLBank(MIDIDeviceManager::upstreamUSBMIDICable3, 0, 0, configuredMask, existingMask, activeMask,
+	                        soloMask);
+	sendLaunchControlXLBank(MIDIDeviceManager::upstreamUSBMIDICable3, 0, 1, configuredMask, existingMask, activeMask,
+	                        soloMask);
+	sendLaunchControlXLBank(MIDIDeviceManager::upstreamUSBMIDICable3, 0, 6, configuredMask, existingMask, activeMask,
+	                        soloMask);
+	sendLaunchControlXLBank(MIDIDeviceManager::upstreamUSBMIDICable3, 0, 7, configuredMask, existingMask, activeMask,
+	                        soloMask);
+	sendLaunchControlXLBank(MIDIDeviceManager::upstreamUSBMIDICable4, 8, 6, configuredMask, existingMask, activeMask,
+	                        soloMask);
+	sendLaunchControlXLBank(MIDIDeviceManager::upstreamUSBMIDICable4, 8, 7, configuredMask, existingMask, activeMask,
+	                        soloMask);
 }
 
 /// called from playback handler

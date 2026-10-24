@@ -45,6 +45,7 @@
 #include "io/debug/log.h"
 #include "io/midi/device_specific/specific_midi_device.h"
 #include "io/midi/midi_engine.h"
+#include "io/midi/midi_follow.h"
 #include "memory/general_memory_allocator.h"
 #include "model/action/action_logger.h"
 #include "model/clip/audio_clip.h"
@@ -3073,6 +3074,7 @@ ActionResult ArrangerView::verticalScrollOneSquare(int32_t direction) {
 			lower->next = output->next;
 			output->next = lower;
 		}
+		midiFollow.trackFeedbackChanged(); // Tracks renumbered
 	}
 	else {
 		currentSong->arrangementYScroll += direction;

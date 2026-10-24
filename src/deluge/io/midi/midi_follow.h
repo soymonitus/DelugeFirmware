@@ -81,6 +81,11 @@ public:
 	void sendCCWithoutModelStackForMidiFollowFeedback(bool isAutomation = false);
 	/// Resolve the configured MIDI Follow feedback targets and send a learned CC value to each one.
 	void sendCCForMidiFollowFeedback(int32_t ccNumber, int32_t knobPos);
+	/// Send effective mute / solo states for configured tracks to two Launch Control XL MK2 banks.
+	void sendTrackMuteSoloFeedback(bool force = false);
+	/// Call when tracks are added, removed or reordered, or one's active clip changes - any of which can renumber the
+	/// tracks. Sends the feedback shortly after, once for a whole burst of changes
+	void trackFeedbackChanged();
 
 	void handleReceivedCC(MIDICable& cable, ModelStackWithTimelineCounter& modelStack, Clip* clip, int32_t ccNumber,
 	                      int32_t ccValue);
@@ -156,6 +161,15 @@ private:
 	                                 int32_t ccNumber, int32_t knobPos);
 	/// Send a learned CC value to one feedback target channel.
 	void sendCCForMidiFollowFeedback(MIDIFollowChannelType feedbackChannelType, int32_t ccNumber, int32_t knobPos);
+	void sendLaunchControlXLBank(MIDICable& cable, uint8_t firstTrack, uint8_t templateIndex, uint16_t configuredMask,
+	                             uint16_t existingMask, uint16_t activeMask, uint16_t soloMask);
+
+	uint16_t lastTrackFeedbackConfiguredMask;
+	uint16_t lastTrackFeedbackExistingMask;
+	uint16_t lastTrackFeedbackActiveMask;
+	uint16_t lastTrackFeedbackSoloMask;
+	bool trackMuteSoloFeedbackInitialized;
+	bool trackFeedbackPending = false;
 
 	// Saving
 

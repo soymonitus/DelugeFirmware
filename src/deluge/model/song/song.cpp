@@ -34,6 +34,7 @@
 #include "hid/matrix/matrix_driver.h"
 #include "io/midi/device_specific/specific_midi_device.h"
 #include "io/midi/midi_engine.h"
+#include "io/midi/midi_follow.h"
 #include "memory/general_memory_allocator.h"
 #include "model/action/action_logger.h"
 #include "model/clip/audio_clip.h"
@@ -3335,6 +3336,7 @@ void Song::addOutput(Output* output, bool atStart) {
 		*prevPointer = output;
 		output->next = nullptr;
 	}
+	midiFollow.trackFeedbackChanged(); // Tracks renumbered
 
 	if (output->soloingInArrangementMode) {
 		anyOutputsSoloingInArrangement = true;
@@ -3390,6 +3392,7 @@ int32_t Song::removeOutputFromMainList(
 	}
 
 	*prevPointer = output->next;
+	midiFollow.trackFeedbackChanged(); // Tracks renumbered
 
 	AudioEngine::mustUpdateReverbParamsBeforeNextRender = true;
 
@@ -3558,6 +3561,8 @@ traverseClips:
 
 	// Put the newInstrument into the master list
 	*prevPointer = newOutput;
+
+	midiFollow.trackFeedbackChanged(); // Tracks renumbered
 	AudioEngine::mustUpdateReverbParamsBeforeNextRender = true;
 }
 
@@ -5289,6 +5294,7 @@ void Song::replaceOutputLowLevel(Output* newOutput, Output* oldOutput) {
 	for (prevPointer = &firstOutput; *prevPointer != oldOutput; prevPointer = &(*prevPointer)->next) {}
 	newOutput->next = oldOutput->next;
 	*prevPointer = newOutput;
+	midiFollow.trackFeedbackChanged(); // Tracks renumbered
 
 	// Migrate all ClipInstances from oldInstrument to newInstrument
 	newOutput->clipInstances.swapStateWith(&oldOutput->clipInstances);
