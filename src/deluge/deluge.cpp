@@ -398,6 +398,7 @@ void setupBlankSong() {
 
 	currentSong = preLoadedSong;
 	preLoadedSong = nullptr;
+	midiFollow.trackFeedbackChanged();
 
 	AudioEngine::getReverbParamsFromSong(currentSong);
 
