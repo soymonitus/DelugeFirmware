@@ -66,6 +66,7 @@ std::array<USBDev, USB_NUM_USBIP> usbDeviceCurrentlyBeingSetUp{};
 PLACE_SDRAM_BSS MIDICableUSBUpstream upstreamUSBMIDICable1{0, false, true};
 PLACE_SDRAM_BSS MIDICableUSBUpstream upstreamUSBMIDICable2{1, true, false};
 PLACE_SDRAM_BSS MIDICableUSBUpstream upstreamUSBMIDICable3{2, false, false};
+PLACE_SDRAM_BSS MIDICableUSBUpstream upstreamUSBMIDICable4{3, false, false};
 PLACE_SDRAM_BSS MIDICableDINPorts dinMIDIPorts{};
 
 uint8_t lowestLastMemberChannelOfLowerZoneOnConnectedOutput = 15;
@@ -77,7 +78,7 @@ bool anyChangesToSave = false;
 void slowRoutine() {
 	upstreamUSBMIDICable1.sendMCMsNowIfNeeded();
 	upstreamUSBMIDICable2.sendMCMsNowIfNeeded();
-	// port3 is not used for channel data
+	// upstream ports 3 and 4 are not used for channel data
 
 	for (int32_t d = 0; d < hostedMIDIDevices.getNumElements(); d++) {
 		MIDICableUSBHosted* device = (MIDICableUSBHosted*)hostedMIDIDevices.getElement(d);
@@ -303,7 +304,8 @@ extern "C" void configuredAsPeripheral(int32_t ip) {
 	connectedDevice->cable[0] = &upstreamUSBMIDICable1;
 	connectedDevice->cable[1] = &upstreamUSBMIDICable2;
 	connectedDevice->cable[2] = &upstreamUSBMIDICable3;
-	connectedDevice->maxPortConnected = 2;
+	connectedDevice->cable[3] = &upstreamUSBMIDICable4;
+	connectedDevice->maxPortConnected = 3;
 	connectedDevice->canHaveMIDISent = 1;
 
 	anyUSBSendingStillHappening[ip] = 0; // Initialize this. There's obviously nothing sending yet right now.
@@ -311,6 +313,7 @@ extern "C" void configuredAsPeripheral(int32_t ip) {
 	upstreamUSBMIDICable1.connectedNow(0);
 	upstreamUSBMIDICable2.connectedNow(0);
 	upstreamUSBMIDICable3.connectedNow(0);
+	upstreamUSBMIDICable4.connectedNow(0);
 	recountSmallestMPEZones();
 }
 
@@ -323,6 +326,7 @@ extern "C" void detachedAsPeripheral(int32_t ip) {
 	upstreamUSBMIDICable1.connectionFlags = 0;
 	upstreamUSBMIDICable2.connectionFlags = 0;
 	upstreamUSBMIDICable3.connectionFlags = 0;
+	upstreamUSBMIDICable4.connectionFlags = 0;
 	anyUSBSendingStillHappening[ip] = 0; // Reset this again. Been meaning to do this, and can no longer quite remember
 	                                     // reason or whether technically essential, but adds to safety at least.
 
@@ -358,6 +362,9 @@ MIDICable* readDeviceReferenceFromFile(Deserializer& reader) {
 			}
 			else if (!strcmp(port, "upstreamUSB3")) {
 				device = &upstreamUSBMIDICable3;
+			}
+			else if (!strcmp(port, "upstreamUSB4")) {
+				device = &upstreamUSBMIDICable4;
 			}
 			else if (!strcmp(port, "din")) {
 				device = &dinMIDIPorts;
@@ -396,6 +403,9 @@ static MIDICable* readCableFromFlash(uint8_t const* memory) {
 	else if (vendorId == VENDOR_ID_UPSTREAM_USB3) {
 		cable = &upstreamUSBMIDICable3;
 	}
+	else if (vendorId == VENDOR_ID_UPSTREAM_USB4) {
+		cable = &upstreamUSBMIDICable4;
+	}
 	else if (vendorId == VENDOR_ID_DIN) {
 		cable = &dinMIDIPorts;
 	}
@@ -431,7 +441,8 @@ void writeDevicesToFile() {
 	anyChangesToSave = false;
 
 	bool anyWorthWritting = dinMIDIPorts.worthWritingToFile() || upstreamUSBMIDICable1.worthWritingToFile()
-	                        || upstreamUSBMIDICable2.worthWritingToFile();
+	                        || upstreamUSBMIDICable2.worthWritingToFile() || upstreamUSBMIDICable3.worthWritingToFile()
+	                        || upstreamUSBMIDICable4.worthWritingToFile();
 	if (!anyWorthWritting) {
 		for (int32_t d = 0; d < hostedMIDIDevices.getNumElements(); d++) {
 			MIDICableUSBHosted* device = (MIDICableUSBHosted*)hostedMIDIDevices.getElement(d);
@@ -468,6 +479,12 @@ void writeDevicesToFile() {
 	if (upstreamUSBMIDICable2.worthWritingToFile()) {
 		upstreamUSBMIDICable2.writeToFile(writer, "upstreamUSBDevice2");
 	}
+	if (upstreamUSBMIDICable3.worthWritingToFile()) {
+		upstreamUSBMIDICable3.writeToFile(writer, "upstreamUSBDevice3");
+	}
+	if (upstreamUSBMIDICable4.worthWritingToFile()) {
+		upstreamUSBMIDICable4.writeToFile(writer, "upstreamUSBDevice4");
+	}
 
 	for (int32_t d = 0; d < hostedMIDIDevices.getNumElements(); d++) {
 		MIDICableUSBHosted* device = (MIDICableUSBHosted*)hostedMIDIDevices.getElement(d);
@@ -497,6 +514,7 @@ void factoryReset(bool showPopup) {
 	new (&upstreamUSBMIDICable1) MIDICableUSBUpstream{0, false, true};
 	new (&upstreamUSBMIDICable2) MIDICableUSBUpstream{1, true, false};
 	new (&upstreamUSBMIDICable3) MIDICableUSBUpstream{2, false, false};
+	new (&upstreamUSBMIDICable4) MIDICableUSBUpstream{3, false, false};
 	new (&dinMIDIPorts) MIDICableDINPorts{};
 
 	recountSmallestMPEZones();
@@ -548,6 +566,9 @@ void readDevicesFromFile() {
 		}
 		else if (!strcmp(tagName, "upstreamUSBDevice3")) {
 			upstreamUSBMIDICable3.readFromFile(reader);
+		}
+		else if (!strcmp(tagName, "upstreamUSBDevice4")) {
+			upstreamUSBMIDICable4.readFromFile(reader);
 		}
 		else if (!strcmp(tagName, "hostedUSBDevice")) {
 			readAHostedDeviceFromFile(reader);

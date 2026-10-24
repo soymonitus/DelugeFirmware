@@ -57,7 +57,7 @@ Macro definitions
  * (9+4+ncables)*2 - shared bulk endpoint, descriptors include list of cables
  * for easy c+p -> 9+9+7+((6+9)*ncables)+(9+4+ncables)*2
  */
-#define NCABLES 3
+#define NCABLES 4
 #define USB_MIDI_CD_WTOTALLENGTH (9 + 7 + (15 * NCABLES) + (13 + NCABLES) * 2)
 
 /* USB audio (UAC1), described in audio10.pdf and frmts10.pdf from usb.org
@@ -477,6 +477,25 @@ uint8_t g_midi_configuration[TOTAL_CONFIG_LENGTH + (TOTAL_CONFIG_LENGTH % 2)] = 
     0x01,          // BaSourcePin (ditto)
     0x00,          // iJack (unused)
 
+    // MIDI_IN 4
+    0x06,         // bLength
+    CS_INTERFACE, // bDescriptorType
+    MIDI_IN_JACK, // bDescriptorSubtype - MIDI_IN_JACK
+    0x01,         // bJackType - EMBEDDED
+    0x07,         // bJackID
+    0x00,         // iJack (unused)
+
+    // MIDI_OUT 4
+    0x09,          // bLength
+    CS_INTERFACE,  // bDescriptorType - CS_I
+    MIDI_OUT_JACK, // bDescriptorSubtype - MIDI_OUT_JACK
+    0x01,          // bJackType - EMBEDDED
+    0x08,          // bJackID
+    0x01,          // bNrInputPins (I can't find an explanation for what this means)
+    0x07,          // BaSourceID (ditto here but I think it is asking which midi in jack is associated?)
+    0x01,          // BaSourcePin (ditto)
+    0x00,          // iJack (unused)
+
     /* MidiStreaming Endpoint Descriptors - USBMidi spec 6.2.1
      * These endpoints are shared across all jacks
      */
@@ -494,10 +513,10 @@ uint8_t g_midi_configuration[TOTAL_CONFIG_LENGTH + (TOTAL_CONFIG_LENGTH % 2)] = 
     (uint8_t)(4 + NCABLES),          // bLength - 4+ncables
     0x25,                            // bDescriptorType - CS_ENDPOINT
     0x01,                            // bDescriptorSubType - MS_GENERAL
-    0x03,                            // bNumEmbMidiJack - number of MIDI IN jacks
+    NCABLES,                         // bNumEmbMidiJack - number of MIDI IN jacks
     0x01,                            // BaAssocJackID - ID of first associated jack
-    0x03,
-    0x05, // ID of last associated jack
+    0x03, 0x05,
+    0x07, // ID of last associated jack
 
     // USB standard bulk in - same fields as above, differences annotated
     0x09,                           // bLength
@@ -512,10 +531,10 @@ uint8_t g_midi_configuration[TOTAL_CONFIG_LENGTH + (TOTAL_CONFIG_LENGTH % 2)] = 
     (uint8_t)(4 + NCABLES),         // bLength - 4+ncables
     CS_ENDPOINT,                    // bDescriptorType - CS_ENDPOINT
     0x01,                           // bDescriptorSubtype
-    0x03,                           // bNumEmbMidiJack - number of MIDI OUT jacks
+    NCABLES,                        // bNumEmbMidiJack - number of MIDI OUT jacks
     0x02,                           // BaAssocJackID - first associated jack
-    0x04,
-    0x06, // Last associated jack
+    0x04, 0x06,
+    0x08, // Last associated jack
 };
 
 /*************************************
