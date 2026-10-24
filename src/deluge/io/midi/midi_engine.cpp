@@ -23,6 +23,7 @@
 #include "hid/hid_sysex.h"
 #include "hid/led/indicator_leds.h"
 #include "io/debug/log.h"
+#include "io/midi/cable_types/usb_common.h"
 #include "io/midi/midi_device.h"
 #include "io/midi/midi_device_manager.h"
 #include "io/midi/midi_follow.h"
@@ -593,18 +594,19 @@ void MidiEngine::sendUsbMidi(MIDIMessage message, int32_t filter) {
 			}
 			int32_t maxPort = connectedDevice->maxPortConnected;
 			for (int32_t p = 0; p <= maxPort; p++) {
-				// if device exists, it's not port 3 (for sysex)
-				if (connectedDevice->cable[p]
-				    && connectedDevice->cable[p] != &MIDIDeviceManager::upstreamUSBMIDICable3) {
-					// if it's a clock (or sysex technically but we don't send that to this function)
-					// or if it's a message that this channel wants
-					if (connectedDevice->cable[p]->wantsToOutputMIDIOnChannel(message, filter)) {
+				MIDICableUSB* usbCable = connectedDevice->cable[p];
+				// Upstream ports 3 and 4 are SysEx-only (no channel MIDI out).
+				if (!usbCable || usbCable->portNumber >= 2) {
+					continue;
+				}
+				// if it's a clock (or sysex technically but we don't send that to this function)
+				// or if it's a message that this channel wants
+				if (usbCable->wantsToOutputMIDIOnChannel(message, filter)) {
 
-						// Or with the port to add the cable number to the full message. This
-						// is a bit hacky but it works
-						uint32_t channeled_message = fullMessage | (p << 4);
-						connectedDevice->bufferMessage(channeled_message);
-					}
+					// Or with the port to add the cable number to the full message. This
+					// is a bit hacky but it works
+					uint32_t channeled_message = fullMessage | (p << 4);
+					connectedDevice->bufferMessage(channeled_message);
 				}
 			}
 		}

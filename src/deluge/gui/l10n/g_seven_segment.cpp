@@ -237,6 +237,7 @@ PLACE_SDRAM_DATA Language seven_segment{
         {STRING_FOR_CLIP_HAS_INSTANCES_IN_ARRANGER, "CANT"},
         {STRING_FOR_DIN_PORTS, "DIN"},
         {STRING_FOR_UPSTREAM_USB_PORT_3_SYSEX, "Computer 3"},
+        {STRING_FOR_UPSTREAM_USB_PORT_4_SYSEX, "Computer 4"},
         {STRING_FOR_UPSTREAM_USB_PORT_2, "Computer 2"},
         {STRING_FOR_UPSTREAM_USB_PORT_1, "Computer 1"},
         {STRING_FOR_HELLO_SYSEX, "SYSX"},

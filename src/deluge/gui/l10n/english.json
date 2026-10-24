@@ -329,6 +329,7 @@
     "STRING_FOR_DIN_PORTS": "DIN ports",
     "STRING_FOR_LOOPBACK": "Loopback",
     "STRING_FOR_UPSTREAM_USB_PORT_3_SYSEX": "upstream USB port 3 (sysex)",
+    "STRING_FOR_UPSTREAM_USB_PORT_4_SYSEX": "upstream USB port 4 (sysex)",
     "STRING_FOR_UPSTREAM_USB_PORT_2": "upstream USB port 2",
     "STRING_FOR_UPSTREAM_USB_PORT_1": "upstream USB port 1",
     "STRING_FOR_HELLO_SYSEX": "hello sysex",
