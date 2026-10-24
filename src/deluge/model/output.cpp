@@ -18,6 +18,7 @@
 #include "model/output.h"
 #include "definitions_cxx.hpp"
 #include "drivers/usb/usb_audio.h"
+#include "io/midi/midi_follow.h"
 #include "memory/general_memory_allocator.h"
 #include "model/action/action_logger.h"
 #include "model/clip/clip.h"
@@ -72,6 +73,7 @@ bool Output::setActiveClip(ModelStackWithTimelineCounter* modelStack, PgmChangeS
 	if (!modelStack) {
 		activeClip = nullptr;
 		inValidState = false;
+		midiFollow.trackFeedbackChanged();
 		return true;
 	}
 	Clip* newClip = (Clip*)modelStack->getTimelineCounter();
@@ -79,12 +81,16 @@ bool Output::setActiveClip(ModelStackWithTimelineCounter* modelStack, PgmChangeS
 	bool clipChanged = (activeClip != newClip);
 	activeClip = newClip;
 	inValidState = true;
+	if (clipChanged) {
+		midiFollow.trackFeedbackChanged(); // Tracks are numbered among those with an active clip
+	}
 	return clipChanged;
 }
 
 void Output::detachActiveClip(Song* song) {
 	activeClip = nullptr;
 	inValidState = false;
+	midiFollow.trackFeedbackChanged();
 
 	AudioEngine::mustUpdateReverbParamsBeforeNextRender = true;
 }
