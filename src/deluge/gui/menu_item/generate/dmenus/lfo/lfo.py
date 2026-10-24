@@ -16,6 +16,14 @@ for i in range(4):
             title="STRING_FOR_LFO_TYPE",
         ),
         Menu(
+            "lfo::ShapeEditor",
+            f"lfo{i + 1}ShapeEditorMenu",
+            ["{name}", f"LFO{i + 1}_ID"],
+            "lfo/shape_editor.md",
+            name="STRING_FOR_LFO_DRAW",
+            available_when="LFO shape is set to Custom",
+        ),
+        Menu(
             "lfo::Sync",
             f"lfo{i + 1}SyncMenu",
             ["{name}", "{title}", f"LFO{i + 1}_ID"],

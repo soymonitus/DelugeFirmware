@@ -20,6 +20,7 @@
 #include "gui/menu_item/horizontal_menu_container.h"
 #include "hid/led/indicator_leds.h"
 #include "param.h"
+#include <complex>
 
 namespace deluge::gui::menu_item::filter {
 
@@ -36,6 +37,9 @@ public:
 		oled_canvas::Canvas& image = OLED::main;
 
 		const auto [freq_raw, reso_raw, morph_raw, is_morphable, is_hpf] = getFilterValues();
+		if (!is_hpf && isVowel()) {
+			return renderVowel(slots, freq_raw, reso_raw, morph_raw);
+		}
 		const float freq_value = freq_raw / 50.f;
 		const float reso_value = sigmoidLikeCurve(reso_raw, 50.f, 30.f);
 		const float morph_value = [&] {
@@ -119,6 +123,64 @@ public:
 private:
 	FilterParam* morph_item_{nullptr};
 	UnpatchedFilterParam* morph_item_unpatched_{nullptr};
+
+	[[nodiscard]] bool isVowel() const {
+		const FilterInfo& info =
+		    (morph_item_ != nullptr) ? morph_item_->getFilterInfo() : morph_item_unpatched_->getFilterInfo();
+		return info.getSlot() == FilterSlot::LPF && info.getMode() == ::FilterMode::VOWEL;
+	}
+
+	/// Vowel mode: draws the filter's actual frequency response (100 Hz - 8 kHz, log scale), so the formants can be
+	/// seen moving with the knobs
+	void renderVowel(const SlotPosition& slots, int32_t freq_raw, int32_t reso_raw, int32_t morph_raw) const {
+		namespace formant = dsp::filter::formant;
+		oled_canvas::Canvas& image = OLED::main;
+
+		const formant::Shape shape = formant::shapeAt(freq_raw / 50.f, morph_raw / 50.f, reso_raw / 50.f);
+		const int32_t raw =
+		    (soundEditor.currentModControllable != nullptr) ? soundEditor.currentModControllable->vowelRaw : 0;
+		const formant::Coefficients co = formant::coefficientsFor(shape, shape.level, formant::rawGainFor(raw));
+
+		constexpr uint8_t padding_x = 5;
+		constexpr uint8_t container_height = 23;
+		const int32_t min_x = slots.start_x + padding_x;
+		const int32_t max_x = min_x + slots.width - 2 - padding_x * 2;
+		const int32_t start_y = slots.start_y + 1;
+		const int32_t end_y = start_y + container_height - 1;
+		image.drawRectangleRounded(min_x - 1, start_y - 1, max_x + 1, end_y + 1);
+
+		constexpr float kLowHz = 100.0f;
+		constexpr float kHighHz = 8000.0f;
+		constexpr float kTopDb = 24.0f;
+		constexpr float kBottomDb = -30.0f;
+		constexpr float kTwoPi = 6.28318530718f;
+		int32_t prev_y = -1;
+		for (int32_t x = min_x; x <= max_x; x++) {
+			const float hz = kLowHz * std::pow(kHighHz / kLowHz, static_cast<float>(x - min_x) / (max_x - min_x));
+			const std::complex<float> z1 = std::polar(1.0f, -kTwoPi * hz / formant::kSampleRate);
+			std::complex<float> response = 1.0f;
+			for (int32_t k = 0; k < formant::kNumFormants; k++) {
+				response *= co.a[k] / (1.0f - co.b[k] * z1 - co.c[k] * z1 * z1);
+			}
+			// Raw runs in parallel to the cascade (pb0 is 0 while it's off)
+			response += co.pb0 * (1.0f - z1 * z1) / (1.0f + co.pa1 * z1 + co.pa2 * z1 * z1);
+			const float db = 20.0f * std::log10(std::max(std::abs(response), 1.0e-6f));
+			const float height = std::clamp((db - kBottomDb) / (kTopDb - kBottomDb), 0.0f, 1.0f);
+			const int32_t y = end_y - static_cast<int32_t>(std::lround(height * (end_y - start_y)));
+			if (prev_y >= 0) {
+				image.drawLine(x - 1, prev_y, x, y);
+			}
+			// Same dotted fill under the curve as the other filter modes
+			if (x % 3 == 0) {
+				for (int32_t fill_y = y; fill_y <= end_y; fill_y++) {
+					if (fill_y % 3 == 1) {
+						image.drawPixel(x, fill_y);
+					}
+				}
+			}
+			prev_y = y;
+		}
+	}
 
 	struct FilterValues {
 		int32_t freq_value{0};

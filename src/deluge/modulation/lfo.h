@@ -20,6 +20,7 @@
 #include "definitions_cxx.hpp"
 #include "io/debug/log.h"
 #include "model/sync.h"
+#include "modulation/lfo_shape.h"
 #include "util/fixedpoint.h"
 #include "util/waves.h"
 
@@ -27,9 +28,23 @@ class LFOConfig {
 public:
 	LFOConfig() : waveType(LFOType::TRIANGLE), syncType(SYNC_TYPE_EVEN), syncLevel(SYNC_LEVEL_NONE) {}
 	LFOConfig(LFOType type) : waveType(type), syncType(SYNC_TYPE_EVEN), syncLevel(SYNC_LEVEL_NONE) {}
+	// The custom shape is owned: copying a config copies its shape too
+	LFOConfig(const LFOConfig& other) { *this = other; }
+	LFOConfig& operator=(const LFOConfig& other);
+	~LFOConfig() { delete shape; }
+
 	LFOType waveType;
 	SyncType syncType;
 	SyncLevel syncLevel;
+	/// Twice the sync length: the longest level then gives 8 bars instead of 4 (at the default song resolution)
+	bool syncDoubled{false};
+	/// The drawn cycle of a CUSTOM LFO. Created when the LFO first becomes CUSTOM, kept (and saved) after that.
+	deluge::modulation::LFOShape* shape{nullptr};
+
+	/// Makes sure a CUSTOM LFO has its shape. False if there was no memory for it (it then renders a triangle).
+	bool ensureShape();
+	/// Internal ticks of one period while synced (sync type and doubling included)
+	[[nodiscard]] uint32_t syncedTicksPerPeriod() const;
 };
 
 class LFO {
@@ -42,6 +57,12 @@ public:
 	void setLocalInitialPhase(const LFOConfig& config);
 	void setGlobalInitialPhase(const LFOConfig& config, bool reset_state = false);
 	[[gnu::always_inline]] int32_t render(int32_t numSamples, LFOConfig& config, uint32_t phaseIncrement) {
+		if (config.waveType == LFOType::CUSTOM) {
+			const int32_t value =
+			    (config.shape != nullptr) ? config.shape->valueAt(phase) : static_cast<int32_t>(getTriangle(phase));
+			phase += phaseIncrement * numSamples;
+			return value;
+		}
 		return render(numSamples, config.waveType, phaseIncrement);
 	}
 	[[gnu::always_inline]] int32_t render(int32_t numSamples, LFOType waveType, uint32_t phaseIncrement) {
@@ -102,7 +123,11 @@ public:
 			phaseIncrement *= 2;
 			warble(numSamples, phaseIncrement);
 			value = holdValue;
+			break;
 		}
+		case LFOType::CUSTOM: // Its shape lives in the LFOConfig (see the other overload) - triangle without one
+			value = getTriangle(phase);
+			break;
 		}
 
 		phase += phaseIncrement * numSamples;

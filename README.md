@@ -1,5 +1,11 @@
 # Deluge Community Firmware
 
+> **Unofficial custom build.** This branch is the community firmware (`main`, October 2026) plus four additions:
+> the **Vowel filter**, **custom LFO shapes** with a shape editor and **8-bar LFO sync**, a **Saturation editor**
+> (Drive / Asymmetry / Mix / Tone) and a **Wavefold editor** (Amount / Symmetry / Tone). How to use them:
+> [feature manual](docs/community-custom-features.md). It is not supported by the community firmware team - please
+> report problems with this build here, not upstream. Everything below is the regular community firmware README.
+
 ## Dear Deluge owners
 If you want to start using the community firmware please visit https://delugecommunity.com/ for all relevant details.
 

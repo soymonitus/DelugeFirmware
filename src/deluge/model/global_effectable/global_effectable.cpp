@@ -753,10 +753,18 @@ void GlobalEffectable::setupFilterSetConfig(int32_t* postFXVolume, ParamManager*
 
 	UnpatchedParamSet* unpatchedParams = paramManager->getUnpatchedParamSet();
 
+	// The Vowel filter maps the cutoff knob onto its vowels with the synth voices' range (paramRanges[LOCAL_LPF_FREQ],
+	// +-5.6 octaves) rather than this wider one, so the same knob value gives the same vowel everywhere.
+	// It bypasses the cache, which is keyed only on the raw knob value and so can't tell the two mappings apart.
+	const int32_t lpfFrequencyKnob = unpatchedParams->getValue(params::UNPATCHED_LPF_FREQ);
 	int32_t lpfFrequency =
-	    conversions.lpfFrequency(unpatchedParams->getValue(params::UNPATCHED_LPF_FREQ), [](int32_t v) {
-		    return getFinalParameterValueExp(paramNeutralValues[params::LOCAL_LPF_FREQ], cableToExpParamShortcut(v));
-	    });
+	    (lpfMode == FilterMode::VOWEL)
+	        ? getFinalParameterValueExp(paramNeutralValues[params::LOCAL_LPF_FREQ],
+	                                    multiply_32x32_rshift32(lpfFrequencyKnob, paramRanges[params::LOCAL_LPF_FREQ]))
+	        : conversions.lpfFrequency(lpfFrequencyKnob, [](int32_t v) {
+		          return getFinalParameterValueExp(paramNeutralValues[params::LOCAL_LPF_FREQ],
+		                                           cableToExpParamShortcut(v));
+	          });
 	int32_t lpfResonance =
 	    conversions.lpfResonance(unpatchedParams->getValue(params::UNPATCHED_LPF_RES), [](int32_t v) {
 		    return getFinalParameterValueLinear(paramNeutralValues[params::LOCAL_LPF_RESONANCE],
@@ -779,12 +787,14 @@ void GlobalEffectable::setupFilterSetConfig(int32_t* postFXVolume, ParamManager*
 	});
 
 	bool doLPF = (lpfMode == FilterMode::TRANSISTOR_24DB_DRIVE
+	              || lpfMode == FilterMode::VOWEL // A wide-open cutoff is the vowel U, not "filter off"
 	              || unpatchedParams->getValue(params::UNPATCHED_LPF_FREQ) < 2147483602
 	              || unpatchedParams->getValue(params::UNPATCHED_LPF_MORPH) > NEGATIVE_ONE_Q31);
 	bool doHPF = unpatchedParams->getValue(params::UNPATCHED_HPF_FREQ) > NEGATIVE_ONE_Q31
 	             || unpatchedParams->getValue(params::UNPATCHED_HPF_MORPH) > NEGATIVE_ONE_Q31;
 	FilterMode lpfModeForRender = doLPF ? lpfMode : FilterMode::OFF;
 	FilterMode hpfModeForRender = doHPF ? hpfMode : FilterMode::OFF;
+	filterSet.setVowelRaw(vowelRaw);
 	*postFXVolume =
 	    filterSet.setConfig(lpfFrequency, lpfResonance, lpfModeForRender, lpfMorph, hpfFrequency, hpfResonance,
 	                        hpfModeForRender, hpfMorph, *postFXVolume, filterRoute, false, NULL);

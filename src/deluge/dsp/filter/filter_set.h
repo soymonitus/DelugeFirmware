@@ -18,6 +18,7 @@
 #pragma once
 
 #include "definitions_cxx.hpp"
+#include "dsp/filter/formant.h"
 #include "dsp/filter/hpladder.h"
 #include "dsp/filter/lpladder.h"
 #include "dsp/filter/svf.h"
@@ -32,6 +33,7 @@ namespace deluge::dsp::filter {
 union LowPass {
 	LpLadderFilter ladder;
 	SVFilter svf;
+	FormantFilter formant;
 	LowPass() {}
 };
 
@@ -49,6 +51,8 @@ public:
 	int32_t setConfig(q31_t lpfFrequency, q31_t lpfResonance, FilterMode lpfmode, q31_t lpfMorph, q31_t hpfFrequency,
 	                  q31_t hpfResonance, FilterMode hpfmode, q31_t hpfMorph, q31_t filterGain, FilterRoute routing,
 	                  bool adjustVolumeForHPFResonance, q31_t* overallOscAmplitude);
+	/// The Vowel filter's Raw amount (0..50), for the next setConfig()
+	void setVowelRaw(uint8_t raw) { vowelRaw_ = raw; }
 
 	void renderLong(q31_t* startSample, q31_t* endSample, int32_t numSamples, int32_t sampleIncrememt = 1);
 
@@ -66,6 +70,7 @@ private:
 	FilterMode hpfMode_;
 	FilterMode lastHPFMode_;
 	FilterRoute routing_;
+	uint8_t vowelRaw_{0};
 
 	void renderLPFLong(q31_t* startSample, q31_t* endSample, int32_t sampleIncrement = 1);
 	void renderLPFLongStereo(q31_t* startSample, q31_t* endSample);

@@ -20,6 +20,7 @@
 #include "definitions_cxx.hpp"
 #include "deluge/dsp/granular/GranularProcessor.h"
 #include "deluge/model/settings/runtime_feature_settings.h"
+#include "dsp/saturation.hpp"
 #include "dsp/stereo_sample.h"
 #include "gui/l10n/l10n.h"
 #include "gui/ui/ui.h"
@@ -67,6 +68,11 @@ ModControllableAudio::ModControllableAudio() {
 
 	// Saturation
 	clippingAmount = 0;
+	clippingTweak = 25;
+	clippingMix = 50;
+	clippingTone = 0;
+	foldTone = 0;
+	vowelRaw = 0;
 
 	SyncLevel syncLevel;
 	Song* song = preLoadedSong;
@@ -91,6 +97,11 @@ void ModControllableAudio::cloneFrom(ModControllableAudio* other) {
 	lpfMode = other->lpfMode;
 	hpfMode = other->hpfMode;
 	clippingAmount = other->clippingAmount;
+	clippingTweak = other->clippingTweak;
+	clippingMix = other->clippingMix;
+	clippingTone = other->clippingTone;
+	foldTone = other->foldTone;
+	vowelRaw = other->vowelRaw;
 	modFXType_ = other->modFXType_;
 	bassFreq = other->bassFreq; // Eventually, these shouldn't be variables like this
 	trebleFreq = other->trebleFreq;
@@ -410,7 +421,17 @@ void ModControllableAudio::writeAttributesToFile(Serializer& writer) {
 	writer.writeAttribute("hpfMode", (char*)lpfTypeToString(hpfMode));
 	writer.writeAttribute("filterRoute", (char*)filterRouteToString(filterRoute));
 	if (clippingAmount) {
+		// Drive 0-50. "clippingTweak" always follows it: that's how loading tells it from the old 0-15 steps.
 		writer.writeAttribute("clippingAmount", clippingAmount);
+		writer.writeAttribute("clippingTweak", clippingTweak);
+		writer.writeAttribute("clippingMix", clippingMix);
+		writer.writeAttribute("clippingTone", clippingTone);
+	}
+	if (foldTone) {
+		writer.writeAttribute("foldTone", foldTone);
+	}
+	if (vowelRaw) {
+		writer.writeAttribute("vowelRaw", vowelRaw);
 	}
 }
 
@@ -734,8 +755,34 @@ Error ModControllableAudio::readTagFromFile(Deserializer& reader, char const* ta
 	}
 
 	else if (!strcmp(tagName, "clippingAmount")) {
-		clippingAmount = reader.readTagOrAttributeValueInt();
+		// Firmware without the 0-50 drive saved 0-15 steps and has no Asymmetry: convert, so the song sounds as before.
+		// A file from this firmware follows up with "clippingTweak", which takes the drive back as saved.
+		clippingAmountAsSaved =
+		    std::clamp<int32_t>(reader.readTagOrAttributeValueInt(), 0, deluge::dsp::kSaturationUiMax);
+		clippingAmount = deluge::dsp::tanhDriveFromLegacySteps(clippingAmountAsSaved);
+		clippingTweak = 0;
 		reader.exitTag("clippingAmount");
+	}
+	else if (!strcmp(tagName, "clippingTweak")) {
+		clippingTweak = reader.readTagOrAttributeValueInt();
+		clippingAmount = clippingAmountAsSaved;
+		reader.exitTag("clippingTweak");
+	}
+	else if (!strcmp(tagName, "clippingMix")) {
+		clippingMix = reader.readTagOrAttributeValueInt();
+		reader.exitTag("clippingMix");
+	}
+	else if (!strcmp(tagName, "clippingTone")) {
+		clippingTone = reader.readTagOrAttributeValueInt();
+		reader.exitTag("clippingTone");
+	}
+	else if (!strcmp(tagName, "foldTone")) {
+		foldTone = reader.readTagOrAttributeValueInt();
+		reader.exitTag("foldTone");
+	}
+	else if (!strcmp(tagName, "vowelRaw")) {
+		vowelRaw = std::clamp<int32_t>(reader.readTagOrAttributeValueInt(), 0, 50);
+		reader.exitTag("vowelRaw");
 	}
 
 	// Arpeggiator
@@ -1439,6 +1486,8 @@ char const* ModControllableAudio::getLPFModeDisplayName() {
 		return l10n::get(STRING_FOR_24DB_LADDER);
 	case FilterMode::TRANSISTOR_24DB_DRIVE:
 		return l10n::get(STRING_FOR_DRIVE);
+	case FilterMode::VOWEL:
+		return l10n::get(STRING_FOR_VOWEL);
 	case FilterMode::SVF_BAND:
 		return l10n::get(STRING_FOR_SVF_BAND);
 	case FilterMode::SVF_NOTCH:
@@ -1449,8 +1498,9 @@ char const* ModControllableAudio::getLPFModeDisplayName() {
 }
 
 void ModControllableAudio::switchHPFMode() {
-	// this works fine, the offset to the first hpf doesn't matter with the modulus
-	hpfMode = static_cast<FilterMode>((util::to_underlying(hpfMode) + 1) % kNumHPFModes + kFirstHPFMode);
+	// Cycle within the HPF modes (they don't start at 0 - the LPF-only modes come first)
+	hpfMode =
+	    static_cast<FilterMode>((util::to_underlying(hpfMode) - kFirstHPFMode + 1) % kNumHPFModes + kFirstHPFMode);
 }
 
 // for future use with FM

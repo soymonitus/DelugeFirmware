@@ -19,6 +19,7 @@
 
 #include "definitions_cxx.hpp"
 #include "dsp/filter/filter_set.h"
+#include "dsp/wavefold.hpp"
 #include "model/voice/voice_sample_playback_guide.h"
 #include "model/voice/voice_unison_part.h"
 #include "modulation/envelope.h"
@@ -74,6 +75,11 @@ public:
 	int32_t portaEnvelopeMaxAmplitude;
 
 	std::array<uint32_t, 2> lastSaturationTanHWorkingValue;
+	std::array<int32_t, 2> lastSaturationToneState;
+	std::array<dsp::WavefoldChannelState, 2> wavefoldState;
+	/// Set once Wavefold Symmetry has been non-zero during this note and kept on until the next
+	/// note-on, so an LFO sweeping Symmetry through 0 can't switch the DC blocker on and off.
+	bool wavefoldDcBlockActive = false;
 
 	int32_t overallOscAmplitudeLastTime;
 	std::array<int32_t, kNumSources> sourceAmplitudesLastTime;
