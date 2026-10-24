@@ -117,6 +117,7 @@ void factoryReset(bool showPopup = true);
 extern MIDICableUSBUpstream upstreamUSBMIDICable1;
 extern MIDICableUSBUpstream upstreamUSBMIDICable2;
 extern MIDICableUSBUpstream upstreamUSBMIDICable3;
+extern MIDICableUSBUpstream upstreamUSBMIDICable4;
 extern MIDICableDINPorts dinMIDIPorts;
 
 extern bool differentiatingInputsByDevice;
