@@ -1,4 +1,52 @@
 #include "modulation/lfo.h"
+#include "util/exceptions.h"
+
+LFOConfig& LFOConfig::operator=(const LFOConfig& other) {
+	if (this == &other) {
+		return *this;
+	}
+	waveType = other.waveType;
+	syncType = other.syncType;
+	syncLevel = other.syncLevel;
+	syncDoubled = other.syncDoubled;
+	if (other.shape == nullptr) {
+		delete shape;
+		shape = nullptr;
+	}
+	else if (shape != nullptr || ensureShape()) {
+		*shape = *other.shape;
+	}
+	return *this;
+}
+
+bool LFOConfig::ensureShape() {
+	if (shape == nullptr) {
+		try {
+			shape = new deluge::modulation::LFOShape();
+		} catch (deluge::exception e) { // Out of memory - the LFO renders a triangle meanwhile
+			return false;
+		}
+	}
+	return true;
+}
+
+uint32_t LFOConfig::syncedTicksPerPeriod() const {
+	uint32_t ticks = uint32_t{3} << (SYNC_LEVEL_256TH - syncLevel);
+	if (syncDoubled) {
+		ticks <<= 1;
+	}
+	switch (syncType) {
+	case SYNC_TYPE_EVEN:
+		break;
+	case SYNC_TYPE_TRIPLET:
+		ticks = ticks * 2 / 3;
+		break;
+	case SYNC_TYPE_DOTTED:
+		ticks = ticks * 3 / 2;
+		break;
+	}
+	return ticks;
+}
 
 uint32_t getLFOInitialPhaseForNegativeExtreme(LFOType waveType) {
 	switch (waveType) {

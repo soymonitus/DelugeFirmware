@@ -64,11 +64,21 @@ morph = MultiModeMenu(
     title="STRING_FOR_LPF_MORPH",
 )
 
+raw = Menu(
+    "filter::VowelRaw",
+    "lpfVowelRawMenu",
+    ["{name}"],
+    "filter/lpf/vowel_raw.md",
+    name="STRING_FOR_VOWEL_RAW",
+    available_when="LPF mode is Vowel",
+)
+
+# filter::LpfMenu: in the Vowel mode CV pressed again on Morph (Formant shift) goes to Raw - keep this order
 menu = Submenu(
-    "HorizontalMenu",
+    "filter::LpfMenu",
     "lpfMenu",
     ["{title}", "%%CHILDREN%%"],
     "filter/lpf/index.md",
-    [mode, freq, res, morph],
+    [mode, freq, res, morph, raw],
     name="STRING_FOR_LPF",
 )

@@ -193,6 +193,7 @@ enum class UIType : uint8_t {
 	DX_BROWSER,
 	INSTRUMENT_CLIP,
 	KEYBOARD_SCREEN,
+	LFO_SHAPE_EDITOR,
 	LOAD_INSTRUMENT_PRESET,
 	LOAD_MIDI_DEVICE_DEFINITION,
 	LOAD_PATTERN,
@@ -402,9 +403,10 @@ enum class LFOType : uint8_t {
 	SAMPLE_AND_HOLD,
 	RANDOM_WALK,
 	WARBLER,
+	CUSTOM, // Drawn by the user (modulation/lfo_shape.h, gui/ui/lfo_shape_editor.h)
 };
 
-constexpr int32_t kNumLFOTypes = util::to_underlying(LFOType::WARBLER) + 1;
+constexpr int32_t kNumLFOTypes = util::to_underlying(LFOType::CUSTOM) + 1;
 
 enum class ModFXType : uint8_t {
 	NONE,

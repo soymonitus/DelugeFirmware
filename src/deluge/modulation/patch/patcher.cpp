@@ -270,6 +270,28 @@ int32_t Patcher::cableToExpParam(int32_t running_total, const PatchCable& patch_
 	return running_total;
 }
 
+int32_t Patcher::finalLinearValueWithoutCables(uint32_t param, Sound& sound, ParamManager& param_manager) {
+	return getFinalParameterValueLinear(paramNeutralValues[param],
+	                                    combineCablesLinear(nullptr, param, sound, param_manager));
+}
+
+int32_t Patcher::sumCablesAdditively(uint32_t param, ParamManager& param_manager) {
+	PatchCableSet& patch_cable_set = *param_manager.getPatchCableSet();
+	const Destination* destination = patch_cable_set.getDestinationForParam(static_cast<int32_t>(param));
+	if (destination == nullptr) {
+		return 0;
+	}
+	int32_t running_total = 0;
+	for (int32_t c = destination->firstCable; c < destination->endCable; c++) {
+		PatchCable& patch_cable = patch_cable_set.patchCables[c];
+		const int32_t source_value = patch_cable.toPolarity(source_values_[std::to_underlying(patch_cable.from)]);
+		const int32_t cable_strength = patch_cable_set.getModifiedPatchCableAmount(c, param);
+		// Saturating: several full-depth cables mustn't wrap round
+		running_total = add_saturate(running_total, cableToExpParam(0, patch_cable, source_value, cable_strength));
+	}
+	return running_total;
+}
+
 // NOTE: parameter preset values can't be bigger than 536870912, otherwise overflowing will occur
 
 void Patcher::performInitialPatching(Sound& sound, ParamManager& param_manager) {

@@ -72,12 +72,16 @@
 #include "gui/menu_item/eq/eq_unpatched_param.h"
 #include "gui/menu_item/file_selector.h"
 #include "gui/menu_item/filter/filter_container.h"
+#include "gui/menu_item/filter/lpf_menu.h"
 #include "gui/menu_item/filter/mode.h"
 #include "gui/menu_item/filter/param.h"
+#include "gui/menu_item/filter/vowel_raw.h"
 #include "gui/menu_item/filter_route.h"
 #include "gui/menu_item/firmware/version.h"
 #include "gui/menu_item/flash/status.h"
 #include "gui/menu_item/fx/clipping.h"
+#include "gui/menu_item/fx/saturation_type.h"
+#include "gui/menu_item/fx/wavefold.h"
 #include "gui/menu_item/gate/mode.h"
 #include "gui/menu_item/gate/off_time.h"
 #include "gui/menu_item/gate/selection.h"
@@ -87,6 +91,7 @@
 #include "gui/menu_item/integer_range.h"
 #include "gui/menu_item/key_range.h"
 #include "gui/menu_item/keyboard/layout.h"
+#include "gui/menu_item/lfo/shape_editor.h"
 #include "gui/menu_item/lfo/sync.h"
 #include "gui/menu_item/lfo/type.h"
 #include "gui/menu_item/master_transpose.h"
@@ -638,6 +643,8 @@ PLACE_SDRAM_BSS UnpatchedParam bitcrushMenu{STRING_FOR_BITCRUSH, params::UNPATCH
 PLACE_SDRAM_BSS patched_param::Integer foldMenu{STRING_FOR_WAVEFOLD, STRING_FOR_WAVEFOLD, params::LOCAL_FOLD,
                                                 RenderingStyle::BAR};
 
+// Original pad/menu grouping, unchanged from stock: SYNTH=Saturation, KIT=Bitcrush, MIDI=Decimation,
+// CV=Wavefold. The saturation and wavefold editors below live on their own pads instead of replacing this one.
 PLACE_SDRAM_BSS HorizontalMenu soundDistortionMenu{
     STRING_FOR_DISTORTION,
     {
@@ -647,6 +654,43 @@ PLACE_SDRAM_BSS HorizontalMenu soundDistortionMenu{
         &foldMenu,
     },
 };
+
+// Saturation editor: SYNTH=Drive, KIT=Asymmetry, MIDI=Mix, CV=Tone. Uses the same HorizontalMenu
+// SYNTH/KIT/MIDI/CV -> children wiring as the envelope graph editor.
+// Uses its own Drive instance (rather than reusing clippingMenu) because a MenuItem's `parent` is
+// set dynamically to whichever HorizontalMenu it's currently a child of (HorizontalMenu::beginSession
+// sets `item->parent = this` for every child) - reusing clippingMenu here would silently steal it
+// away from soundDistortionMenu's original Saturation/Bitcrush/SRR/Fold grouping. Both instances
+// read/write the same underlying clippingAmount field, so they stay in sync automatically.
+// Like every stock pad, the Saturation pad (paramShortcutsForSounds[7][6]) points at a child (Drive), not at
+// the menu itself, and the menu sits in horizontalMenusChainForSound so maybeGetParentMenu() finds and
+// focuses it. A pad pointing straight at a HorizontalMenu that was never opened crashes when pressed with
+// another menu open: getParamKind() reads the unfocused menu's current_item_ (== items.end()).
+PLACE_SDRAM_BSS fx::Clipping saturationDriveMenu{STRING_FOR_SATURATION};
+PLACE_SDRAM_BSS fx::SaturationTweak saturationTweakMenu{STRING_FOR_ASYMMETRY};
+PLACE_SDRAM_BSS fx::SaturationMix saturationMixMenu{STRING_FOR_MIX};
+PLACE_SDRAM_BSS fx::SaturationTone saturationToneMenu{STRING_FOR_TONE};
+PLACE_SDRAM_BSS HorizontalMenu saturationMenu{
+    STRING_FOR_SATURATION,
+    {
+        &saturationDriveMenu,
+        &saturationTweakMenu,
+        &saturationMixMenu,
+        &saturationToneMenu,
+    },
+};
+
+// Wavefold editor: Amount / Symmetry / Tone (Sound/Synth only - the fold runs per voice). The Fold pad
+// (paramShortcutsForSounds[7][7]) opens it, pressing that pad again jumps to Symmetry (second layer).
+// Uses its own Amount instance rather than reusing foldMenu, for the same parent-stealing reason as
+// saturationDriveMenu; both write LOCAL_FOLD, so they stay in sync.
+PLACE_SDRAM_BSS patched_param::Integer wavefoldAmountMenu{STRING_FOR_WAVEFOLD, STRING_FOR_WAVEFOLD, params::LOCAL_FOLD,
+                                                          RenderingStyle::BAR};
+PLACE_SDRAM_BSS fx::WavefoldSymmetry wavefoldSymmetryMenu{STRING_FOR_WAVEFOLD_SYMMETRY, STRING_FOR_WAVEFOLD_SYMMETRY,
+                                                          params::LOCAL_FOLD_SYMMETRY};
+PLACE_SDRAM_BSS fx::WavefoldTone wavefoldToneMenu{STRING_FOR_TONE};
+PLACE_SDRAM_BSS HorizontalMenu wavefoldMenu{STRING_FOR_WAVEFOLD,
+                                            {&wavefoldAmountMenu, &wavefoldSymmetryMenu, &wavefoldToneMenu}};
 
 // Output MIDI for sound drums --------------------------------------------------------------
 PLACE_SDRAM_BSS midi::sound::OutputMidiChannel outputMidiChannelMenu{STRING_FOR_CHANNEL, STRING_FOR_CHANNEL};
@@ -723,8 +767,10 @@ PLACE_SDRAM_BSS filter::UnpatchedFilterParam globalLPFResMenu{STRING_FOR_RESONAN
 PLACE_SDRAM_BSS filter::UnpatchedFilterParam globalLPFMorphMenu{STRING_FOR_MORPH, STRING_FOR_LPF_MORPH,
                                                                 params::UNPATCHED_LPF_MORPH, filter::FilterSlot::LPF,
                                                                 filter::FilterParamType::MORPH};
-PLACE_SDRAM_BSS HorizontalMenu globalLPFMenu{
-    STRING_FOR_LPF, {&lpfModeMenu, &globalLPFFreqMenu, &globalLPFResMenu, &globalLPFMorphMenu}};
+// Its own Raw instance - a MenuItem's parent is set to whichever HorizontalMenu it's in
+PLACE_SDRAM_BSS filter::VowelRaw globalLpfVowelRawMenu{STRING_FOR_VOWEL_RAW};
+PLACE_SDRAM_BSS filter::LpfMenu globalLPFMenu{
+    STRING_FOR_LPF, {&lpfModeMenu, &globalLPFFreqMenu, &globalLPFResMenu, &globalLPFMorphMenu, &globalLpfVowelRawMenu}};
 
 // HPF Menu
 PLACE_SDRAM_BSS filter::UnpatchedFilterParam globalHPFFreqMenu{STRING_FOR_FREQUENCY, STRING_FOR_HPF_FREQUENCY,
@@ -907,12 +953,18 @@ PLACE_SDRAM_BSS HorizontalMenu audioClipMasterMenu{
     {&globalLevelMenu, &globalPanMenu},
 };
 
+// Separate instance from saturationToneMenu (Sound-only) - a MenuItem's `parent` is set to
+// whichever HorizontalMenu it's currently a child of, so sharing one instance across two
+// different groupings would silently steal it from the other (see saturationDriveMenu's own
+// comment above for the full explanation). Both instances read/write the same clippingTone field.
+PLACE_SDRAM_BSS fx::SaturationTone audioClipSaturationToneMenu{STRING_FOR_TONE};
 PLACE_SDRAM_BSS HorizontalMenu audioClipDistortionMenu{
     STRING_FOR_DISTORTION,
     {
         &clippingMenu,
         &bitcrushMenu,
         &srrMenu,
+        &audioClipSaturationToneMenu,
     },
 };
 
@@ -1513,6 +1565,8 @@ PLACE_SDRAM_BSS Submenu soundFXMenu{
         &stutterMenu,
         &modFXMenu,
         &soundDistortionMenu,
+        &saturationMenu,
+        &wavefoldMenu,
         &noiseMenu,
     },
 };
@@ -1938,7 +1992,7 @@ PLACE_SDRAM_DATA MenuItem* paramShortcutsForSounds[][kDisplayHeight] = {
     {&modulator0Volume,		&modulator0TransposeMenu,	comingSoonMenu,                 comingSoonMenu,                 &modulator0PhaseMenu,	&modulator0FeedbackMenu,	comingSoonMenu,					&sequenceDirectionMenu             },
     {&modulator1Volume,		&modulator1TransposeMenu,	comingSoonMenu,                 comingSoonMenu,                 &modulator1PhaseMenu,	&modulator1FeedbackMenu,	&modulatorDestMenu,				&stutterRateMenu                   },
     {&volumeMenu,			&masterTransposeMenu,		&vibratoMenu,                   &panMenu,                       &synthModeMenu,			&srrMenu,					&bitcrushMenu,					&clippingMenu                      },
-    {&portaMenu,				&polyphonyMenu,				&priorityMenu,                  &unisonDetuneMenu,              &numUnisonMenu,			&threshold,					nullptr,						&foldMenu                          },
+    {&portaMenu,				&polyphonyMenu,				&priorityMenu,                  &unisonDetuneMenu,              &numUnisonMenu,			&threshold,					&saturationDriveMenu,			&wavefoldAmountMenu                },
     {&env1ReleaseMenu,		&env1SustainMenu,			&env1DecayMenu,                 &env1AttackMenu,                &lpfMorphMenu,			&lpfModeMenu,				&lpfResMenu,					&lpfFreqMenu                       },
     {&env2ReleaseMenu,		&env2SustainMenu,			&env2DecayMenu,                 &env2AttackMenu,                &hpfMorphMenu,			&hpfModeMenu,				&hpfResMenu,					&hpfFreqMenu                       },
     {&sidechainReleaseMenu,	&sidechainSyncMenu,			&sidechainVolumeShortcutMenu,   &sidechainAttackMenu,           &sidechainShapeMenu,	&sidechainSendMenu,			&bassMenu,						&bassFreqMenu                      },
@@ -1957,7 +2011,7 @@ PLACE_SDRAM_DATA MenuItem* paramShortcutsForSoundsSecondLayer[][kDisplayHeight] 
     {nullptr,	        nullptr,	            nullptr,	        nullptr,	        nullptr,	                nullptr,	nullptr,	nullptr              },
     {nullptr,	        nullptr,	            nullptr,	        nullptr,	        nullptr,	                nullptr,	nullptr,	&stutterDirectionMenu},
     {nullptr,	        nullptr,	            nullptr,	        nullptr,	        nullptr,	                nullptr,	nullptr,	nullptr              },
-    {nullptr,	        &voice::polyphonicVoiceCountMenu, nullptr,  nullptr,	        &unison::stereoSpreadMenu,  &compRatio,	nullptr,	nullptr              },
+    {nullptr,	        &voice::polyphonicVoiceCountMenu, nullptr,  nullptr,	        &unison::stereoSpreadMenu,  &compRatio,	nullptr,	&wavefoldSymmetryMenu},
     {&env3ReleaseMenu,	&env3SustainMenu,	    &env3DecayMenu,	    &env3AttackMenu,	nullptr,	                nullptr,	nullptr,	nullptr              },
     {&env4ReleaseMenu,	&env4SustainMenu,	    &env4DecayMenu,	    &env4AttackMenu,	nullptr,	                nullptr,	nullptr,	nullptr              },
     {nullptr,	        nullptr,	            nullptr,	        nullptr,	        nullptr,	                nullptr,	nullptr,	nullptr              },
@@ -2029,7 +2083,7 @@ PLACE_SDRAM_BSS deluge::vector<HorizontalMenu*> horizontalMenusChainForSound = {
     &recorderMenu, &soundMasterMenu,
 	&sourceMenuGroup, &voiceMenuGroup, &envMenuGroup, &lfoMenuGroup,
 	&filtersMenuGroup, &eqMenu, &modFXMenu,
-	&reverbMenuGroup, &delayMenu, &soundDistortionMenu,
+	&reverbMenuGroup, &delayMenu, &soundDistortionMenu, &saturationMenu, &wavefoldMenu,
 	&sidechainMenu, &audioCompMenu, &stutterMenu,
 	&arpMenuGroup, &randomizerMenu
 };

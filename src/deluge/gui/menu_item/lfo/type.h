@@ -16,6 +16,7 @@
  */
 #pragma once
 #include "definitions_cxx.hpp"
+#include "gui/ui/lfo_shape_editor.h"
 #include "gui/ui/sound_editor.h"
 #include "model/drum/drum.h"
 #include "model/instrument/kit.h"
@@ -43,6 +44,7 @@ public:
 		    l10n::getView(STRING_FOR_SAMPLE_AND_HOLD),
 		    l10n::getView(shortOpt ? STRING_FOR_RANDOM_WALK_SHORT : STRING_FOR_RANDOM_WALK),
 		    l10n::getView(STRING_FOR_WARBLE),
+		    l10n::getView(STRING_FOR_CUSTOM),
 		};
 	}
 
@@ -59,6 +61,9 @@ public:
 				if (thisDrum->type == DrumType::SOUND) {
 					auto* soundDrum = static_cast<SoundDrum*>(thisDrum);
 					soundDrum->lfoConfig[lfoId_].waveType = current_value;
+					if (current_value == LFOType::CUSTOM) {
+						soundDrum->lfoConfig[lfoId_].ensureShape();
+					}
 					// This fires unnecessarily for LFO2 assignments as well, but that's ok. It's not
 					// entirely clear if we really need this for the LFO1, even: maybe the clock-driven resyncs
 					// would be enough?
@@ -69,6 +74,9 @@ public:
 		// Or, the normal case of just one sound
 		else {
 			soundEditor.currentSound->lfoConfig[lfoId_].waveType = current_value;
+			if (current_value == LFOType::CUSTOM) {
+				soundEditor.currentSound->lfoConfig[lfoId_].ensureShape(); // Starts as a triangle, ready to draw
+			}
 			// This fires unnecessarily for LFO2 assignments as well, but that's ok. It's not
 			// entirely clear if we really need this for the LFO1, even: maybe the clock-driven resyncs
 			// would be enough?
@@ -80,6 +88,13 @@ public:
 
 	void renderInHorizontalMenu(const SlotPosition& slot) override {
 		oled_canvas::Canvas& image = OLED::main;
+		const LFOConfig& config = soundEditor.currentSound->lfoConfig[lfoId_];
+		if (config.waveType == LFOType::CUSTOM && config.shape != nullptr) {
+			// No icon for a drawn shape: draw it
+			return LFOShapeEditor::drawShape(image, *config.shape, slot.start_x + 6,
+			                                 slot.start_y + kHorizontalMenuSlotYOffset + 2,
+			                                 slot.start_x + slot.width - 7, slot.start_y + slot.height - 6);
+		}
 
 		const Icon& icon = [&] {
 			switch (soundEditor.currentSound->lfoConfig[lfoId_].waveType) {
@@ -97,6 +112,8 @@ public:
 				return OLED::randomWalkIcon;
 			case LFOType::WARBLER:
 				return OLED::warblerIcon;
+			case LFOType::CUSTOM:
+				return OLED::sineIcon; // Only without a shape (no memory) - drawn above otherwise
 			}
 			return OLED::sineIcon;
 		}();

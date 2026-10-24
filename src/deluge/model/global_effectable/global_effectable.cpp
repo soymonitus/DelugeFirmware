@@ -753,9 +753,13 @@ void GlobalEffectable::setupFilterSetConfig(int32_t* postFXVolume, ParamManager*
 
 	UnpatchedParamSet* unpatchedParams = paramManager->getUnpatchedParamSet();
 
-	int32_t lpfFrequency =
-	    getFinalParameterValueExp(paramNeutralValues[params::LOCAL_LPF_FREQ],
-	                              cableToExpParamShortcut(unpatchedParams->getValue(params::UNPATCHED_LPF_FREQ)));
+	// The Vowel filter maps the cutoff knob onto its vowels with the synth voices' range (paramRanges[LOCAL_LPF_FREQ],
+	// +-5.6 octaves) rather than this wider one, so the same knob value gives the same vowel everywhere
+	const int32_t lpfFrequencyKnob = unpatchedParams->getValue(params::UNPATCHED_LPF_FREQ);
+	int32_t lpfFrequency = getFinalParameterValueExp(
+	    paramNeutralValues[params::LOCAL_LPF_FREQ],
+	    (lpfMode == FilterMode::VOWEL) ? multiply_32x32_rshift32(lpfFrequencyKnob, paramRanges[params::LOCAL_LPF_FREQ])
+	                                   : cableToExpParamShortcut(lpfFrequencyKnob));
 	int32_t lpfResonance =
 	    getFinalParameterValueLinear(paramNeutralValues[params::LOCAL_LPF_RESONANCE],
 	                                 cableToLinearParamShortcut(unpatchedParams->getValue(params::UNPATCHED_LPF_RES)));
@@ -773,12 +777,14 @@ void GlobalEffectable::setupFilterSetConfig(int32_t* postFXVolume, ParamManager*
 	                                 cableToExpParamShortcut(unpatchedParams->getValue(params::UNPATCHED_HPF_MORPH)));
 
 	bool doLPF = (lpfMode == FilterMode::TRANSISTOR_24DB_DRIVE
+	              || lpfMode == FilterMode::VOWEL // A wide-open cutoff is the vowel U, not "filter off"
 	              || unpatchedParams->getValue(params::UNPATCHED_LPF_FREQ) < 2147483602
 	              || unpatchedParams->getValue(params::UNPATCHED_LPF_MORPH) > NEGATIVE_ONE_Q31);
 	bool doHPF = unpatchedParams->getValue(params::UNPATCHED_HPF_FREQ) > NEGATIVE_ONE_Q31
 	             || unpatchedParams->getValue(params::UNPATCHED_HPF_MORPH) > NEGATIVE_ONE_Q31;
 	FilterMode lpfModeForRender = doLPF ? lpfMode : FilterMode::OFF;
 	FilterMode hpfModeForRender = doHPF ? hpfMode : FilterMode::OFF;
+	filterSet.setVowelRaw(vowelRaw);
 	*postFXVolume =
 	    filterSet.setConfig(lpfFrequency, lpfResonance, lpfModeForRender, lpfMorph, hpfFrequency, hpfResonance,
 	                        hpfModeForRender, hpfMorph, *postFXVolume, filterRoute, false, NULL);

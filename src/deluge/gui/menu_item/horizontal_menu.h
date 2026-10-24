@@ -74,16 +74,16 @@ protected:
 	virtual void selectMenuItem(int32_t page_number, int32_t item_pos);
 	virtual void switchVisiblePage(int32_t direction);
 	virtual void switchHorizontalMenu(int32_t direction, std::span<HorizontalMenu* const> chain);
+	static void displayNotification(MenuItem* menuItem);
+	static MenuPermission initializeItem(MenuItem* menuItem);
 
 private:
 	void updateSelectedMenuItemLED(int32_t itemNumber) const;
 	static void handleItemAction(MenuItem* menuItem);
-	static void displayNotification(MenuItem* menuItem);
 	void renderTitle(const Paging& paging) const;
 	static void renderPageCounters(const Paging& paging);
 	static void renderColumnLabel(MenuItem* menuItem, int32_t labelY, int32_t slotStartX, int32_t slotWidth,
 	                              bool isSelected);
-	static MenuPermission initializeItem(MenuItem* menuItem);
 
 	static deluge::hid::encoders::EncoderAcceleration& acceleration();
 	double calcNextKnobSpeed(int8_t offset);

@@ -145,6 +145,7 @@ void Sound::initParams(ParamManager* paramManager) {
 	    getParamFromUserValue(params::GLOBAL_VOLUME_POST_FX, kDefaultSoundVolumeUserValue));
 	patchedParams->params[params::GLOBAL_VOLUME_POST_REVERB_SEND].setCurrentValueBasicForSetup(0);
 	patchedParams->params[params::LOCAL_FOLD].setCurrentValueBasicForSetup(-2147483648);
+	patchedParams->params[params::LOCAL_FOLD_SYMMETRY].setCurrentValueBasicForSetup(0); // centre = symmetric
 	patchedParams->params[params::LOCAL_HPF_RESONANCE].setCurrentValueBasicForSetup(-2147483648);
 	patchedParams->params[params::LOCAL_HPF_FREQ].setCurrentValueBasicForSetup(-2147483648);
 	patchedParams->params[params::LOCAL_HPF_MORPH].setCurrentValueBasicForSetup(-2147483648);
@@ -405,6 +406,50 @@ void Sound::recalculatePatchingToParam(uint8_t p, ParamManagerForTimeline* param
 	UnpatchedParamSet* unpatchedParams = (UnpatchedParamSet*)unpatchedParamsSummary->paramCollection;                  \
 	ParamCollectionSummary* patchedParamsSummary = paramManager->getPatchedParamSetSummary();                          \
 	PatchedParamSet* patchedParams = (PatchedParamSet*)patchedParamsSummary->paramCollection;
+
+/// Reads the LFO attributes this firmware adds (8-bar sync, custom shape). Returns false if tagName isn't one of them.
+static bool readLFOExtraFromFile(Deserializer& reader, char const* tagName, LFOConfig& config) {
+	if (!strcmp(tagName, "syncDoubled")) {
+		config.syncDoubled = (reader.readTagOrAttributeValueInt() != 0);
+		reader.exitTag("syncDoubled");
+		return true;
+	}
+	// The shape comes in chunks (see LFOShape::toHex()). A damaged one leaves the default shape.
+	// exitTag() gets the literal, not tagName - the reader may reuse tagName's buffer while reading the value
+	if (!strcmp(tagName, "shape")) {
+		if (config.ensureShape()) {
+			config.shape->fromHex(reader.readTagOrAttributeValue());
+		}
+		reader.exitTag("shape");
+		return true;
+	}
+	if (!strcmp(tagName, "shapeB") || !strcmp(tagName, "shapeC")) {
+		const bool chunkB = (tagName[5] == 'B');
+		if (config.shape != nullptr) {
+			config.shape->appendHex(reader.readTagOrAttributeValue());
+		}
+		reader.exitTag(chunkB ? "shapeB" : "shapeC");
+		return true;
+	}
+	return false;
+}
+
+static void writeLFOExtraToFile(Serializer& writer, const LFOConfig& config) {
+	using deluge::modulation::LFOShape;
+	if (config.syncDoubled) {
+		writer.writeAttribute("syncDoubled", 1, false);
+	}
+	if (config.waveType == LFOType::CUSTOM && config.shape != nullptr) {
+		// In chunks: the file reader cuts values off at 255 characters
+		static constexpr const char* kChunkNames[] = {"shape", "shapeB", "shapeC"};
+		static_assert(LFOShape::kMaxPoints <= 3 * LFOShape::kHexChunkPoints);
+		char hex[LFOShape::kHexBufferSize];
+		for (int32_t chunk = 0; chunk < 3 && chunk * LFOShape::kHexChunkPoints < config.shape->numPoints(); chunk++) {
+			config.shape->toHex(hex, chunk * LFOShape::kHexChunkPoints);
+			writer.writeAttribute(kChunkNames[chunk], hex, false);
+		}
+	}
+}
 
 // paramManager only required for old old song files, or for presets (because you'd be wanting to extract the
 // defaultParams into it). arpSettings optional - no need if you're loading a new V2.0 song where Instruments are all
@@ -896,6 +941,7 @@ Error Sound::readTagFromFileOrError(Deserializer& reader, char const* tagName, P
 		// Set default values in case they are not configured.
 		lfoConfig[LFO1_ID].syncLevel = SYNC_LEVEL_NONE;
 		lfoConfig[LFO1_ID].syncType = SYNC_TYPE_EVEN;
+		lfoConfig[LFO1_ID].syncDoubled = false;
 		reader.match('{');
 		while (*(tagName = reader.readNextTagOrAttributeName())) {
 			if (!strcmp(tagName, "type")) {
@@ -917,11 +963,17 @@ Error Sound::readTagFromFileOrError(Deserializer& reader, char const* tagName, P
 				    (SyncLevel)song->convertSyncLevelFromFileValueToInternalValue(reader.readTagOrAttributeValueInt());
 				reader.exitTag("syncLevel");
 			}
+			else if (readLFOExtraFromFile(reader, tagName, lfoConfig[LFO1_ID])) {
+				// 8-bar sync or custom shape - read in full
+			}
 			else {
 				reader.exitTag(tagName);
 			}
 		}
 		reader.exitTag("lfo1", true);
+		if (lfoConfig[LFO1_ID].waveType == LFOType::CUSTOM) {
+			lfoConfig[LFO1_ID].ensureShape();
+		}
 		resyncGlobalLFOs();
 	}
 
@@ -929,6 +981,7 @@ Error Sound::readTagFromFileOrError(Deserializer& reader, char const* tagName, P
 		// Set default values in case they are not configured.
 		lfoConfig[LFO2_ID].syncLevel = SYNC_LEVEL_NONE;
 		lfoConfig[LFO2_ID].syncType = SYNC_TYPE_EVEN;
+		lfoConfig[LFO2_ID].syncDoubled = false;
 		reader.match('{');
 		while (*(tagName = reader.readNextTagOrAttributeName())) {
 			if (!strcmp(tagName, "type")) {
@@ -950,11 +1003,17 @@ Error Sound::readTagFromFileOrError(Deserializer& reader, char const* tagName, P
 				    (SyncLevel)song->convertSyncLevelFromFileValueToInternalValue(reader.readTagOrAttributeValueInt());
 				reader.exitTag("syncLevel");
 			}
+			else if (readLFOExtraFromFile(reader, tagName, lfoConfig[LFO2_ID])) {
+				// 8-bar sync or custom shape - read in full
+			}
 			else {
 				reader.exitTag(tagName);
 			}
 		}
 		reader.exitTag("lfo2", true);
+		if (lfoConfig[LFO2_ID].waveType == LFOType::CUSTOM) {
+			lfoConfig[LFO2_ID].ensureShape();
+		}
 		// No resync for LFO2
 	}
 
@@ -962,6 +1021,7 @@ Error Sound::readTagFromFileOrError(Deserializer& reader, char const* tagName, P
 		// Set default values in case they are not configured.
 		lfoConfig[LFO3_ID].syncLevel = SYNC_LEVEL_NONE;
 		lfoConfig[LFO3_ID].syncType = SYNC_TYPE_EVEN;
+		lfoConfig[LFO3_ID].syncDoubled = false;
 		reader.match('{');
 		while (*(tagName = reader.readNextTagOrAttributeName())) {
 			if (!strcmp(tagName, "type")) {
@@ -983,11 +1043,17 @@ Error Sound::readTagFromFileOrError(Deserializer& reader, char const* tagName, P
 				    (SyncLevel)song->convertSyncLevelFromFileValueToInternalValue(reader.readTagOrAttributeValueInt());
 				reader.exitTag("syncLevel");
 			}
+			else if (readLFOExtraFromFile(reader, tagName, lfoConfig[LFO3_ID])) {
+				// 8-bar sync or custom shape - read in full
+			}
 			else {
 				reader.exitTag(tagName);
 			}
 		}
 		reader.exitTag("lfo3", true);
+		if (lfoConfig[LFO3_ID].waveType == LFOType::CUSTOM) {
+			lfoConfig[LFO3_ID].ensureShape();
+		}
 		resyncGlobalLFOs();
 	}
 
@@ -995,6 +1061,7 @@ Error Sound::readTagFromFileOrError(Deserializer& reader, char const* tagName, P
 		// Set default values in case they are not configured.
 		lfoConfig[LFO4_ID].syncLevel = SYNC_LEVEL_NONE;
 		lfoConfig[LFO4_ID].syncType = SYNC_TYPE_EVEN;
+		lfoConfig[LFO4_ID].syncDoubled = false;
 		reader.match('{');
 		while (*(tagName = reader.readNextTagOrAttributeName())) {
 			if (!strcmp(tagName, "type")) {
@@ -1016,11 +1083,17 @@ Error Sound::readTagFromFileOrError(Deserializer& reader, char const* tagName, P
 				    (SyncLevel)song->convertSyncLevelFromFileValueToInternalValue(reader.readTagOrAttributeValueInt());
 				reader.exitTag("syncLevel");
 			}
+			else if (readLFOExtraFromFile(reader, tagName, lfoConfig[LFO4_ID])) {
+				// 8-bar sync or custom shape - read in full
+			}
 			else {
 				reader.exitTag(tagName);
 			}
 		}
 		reader.exitTag("lfo4", true);
+		if (lfoConfig[LFO4_ID].waveType == LFOType::CUSTOM) {
+			lfoConfig[LFO4_ID].ensureShape();
+		}
 		// No resync for LFO4
 	}
 
@@ -2532,6 +2605,7 @@ void Sound::render(ModelStackWithThreeMainThings* modelStack, std::span<StereoSa
 		q31_t hpfFreq = getSmoothedPatchedParamValue(params::LOCAL_HPF_FREQ, *paramManager);
 		bool doLPF = thisHasFilters
 		             && (lpfMode == FilterMode::TRANSISTOR_24DB_DRIVE
+		                 || lpfMode == FilterMode::VOWEL // A wide-open cutoff is the vowel U, not "filter off"
 		                 || paramManager->getPatchCableSet()->doesParamHaveSomethingPatchedToIt(params::LOCAL_LPF_FREQ)
 		                 || (lpfFreq < 0x7FFFFFD2) || (lpfMorph > std::numeric_limits<q31_t>::min()));
 		bool doHPF =
@@ -2731,6 +2805,9 @@ uint32_t Sound::getGlobalLFOPhaseIncrement(LFO_ID lfoId, deluge::modulation::par
 uint32_t Sound::getSyncedLFOPhaseIncrement(const LFOConfig& config) {
 	uint32_t phaseIncrement =
 	    (playbackHandler.getTimePerInternalTickInverse()) >> (SYNC_LEVEL_256TH - config.syncLevel);
+	if (config.syncDoubled) {
+		phaseIncrement >>= 1; // 8 bars: half the speed of the longest regular level
+	}
 	switch (config.syncType) {
 	case SYNC_TYPE_EVEN:
 		// Nothing to do
@@ -2764,18 +2841,7 @@ void Sound::resyncGlobalLFOs(bool reset_state) {
 
 		// If we're right at the first tick, no need to do anything else!
 		if (lastInternalTickDone || timeSinceLastTick) {
-			uint32_t numInternalTicksPerPeriod = 3 << (SYNC_LEVEL_256TH - lfoConfig[LFO1_ID].syncLevel);
-			switch (lfoConfig[LFO1_ID].syncType) {
-			case SYNC_TYPE_EVEN:
-				// Nothing to do
-				break;
-			case SYNC_TYPE_TRIPLET:
-				numInternalTicksPerPeriod = numInternalTicksPerPeriod * 2 / 3;
-				break;
-			case SYNC_TYPE_DOTTED:
-				numInternalTicksPerPeriod = numInternalTicksPerPeriod * 3 / 2;
-				break;
-			}
+			uint32_t numInternalTicksPerPeriod = lfoConfig[LFO1_ID].syncedTicksPerPeriod();
 			uint32_t offsetTicks = (uint64_t)lastInternalTickDone % (uint16_t)numInternalTicksPerPeriod;
 
 			// If we're right at a bar (or something), no need to do anyting else
@@ -2801,18 +2867,7 @@ void Sound::resyncGlobalLFOs(bool reset_state) {
 
 		// If we're right at the first tick, no need to do anything else!
 		if (lastInternalTickDone || timeSinceLastTick) {
-			uint32_t numInternalTicksPerPeriod = 3 << (SYNC_LEVEL_256TH - lfoConfig[LFO3_ID].syncLevel);
-			switch (lfoConfig[LFO3_ID].syncType) {
-			case SYNC_TYPE_EVEN:
-				// Nothing to do
-				break;
-			case SYNC_TYPE_TRIPLET:
-				numInternalTicksPerPeriod = numInternalTicksPerPeriod * 2 / 3;
-				break;
-			case SYNC_TYPE_DOTTED:
-				numInternalTicksPerPeriod = numInternalTicksPerPeriod * 3 / 2;
-				break;
-			}
+			uint32_t numInternalTicksPerPeriod = lfoConfig[LFO3_ID].syncedTicksPerPeriod();
 			uint32_t offsetTicks = (uint64_t)lastInternalTickDone % (uint16_t)numInternalTicksPerPeriod;
 
 			// If we're right at a bar (or something), no need to do anyting else
@@ -3847,6 +3902,10 @@ bool Sound::readParamTagFromFile(Deserializer& reader, char const* tagName, Para
 		patchedParams->readParam(reader, patchedParamsSummary, params::LOCAL_FOLD, readAutomationUpToPos);
 		reader.exitTag("waveFold");
 	}
+	else if (!strcmp(tagName, "waveFoldSymmetry")) {
+		patchedParams->readParam(reader, patchedParamsSummary, params::LOCAL_FOLD_SYMMETRY, readAutomationUpToPos);
+		reader.exitTag("waveFoldSymmetry");
+	}
 
 	else if (!strcmp(tagName, "envelope1")) {
 		reader.match('{');
@@ -4124,6 +4183,9 @@ void Sound::writeParamsToFile(Serializer& writer, ParamManager* paramManager, bo
 	patchedParams->writeParamAsAttribute(writer, "hpfMorph", params::LOCAL_HPF_MORPH, writeAutomation);
 
 	patchedParams->writeParamAsAttribute(writer, "waveFold", params::LOCAL_FOLD, writeAutomation);
+	// Symmetry's default (centre) is 0, so onlyIfContainsSomething is safe here
+	patchedParams->writeParamAsAttribute(writer, "waveFoldSymmetry", params::LOCAL_FOLD_SYMMETRY, writeAutomation,
+	                                     true);
 
 	writer.writeOpeningTagEnd();
 
@@ -4200,6 +4262,7 @@ void Sound::writeToFile(Serializer& writer, bool savingSong, ParamManager* param
 	writer.writeAbsoluteSyncLevelToFile(currentSong, "syncLevel", lfoConfig[LFO1_ID].syncLevel, false);
 	// Community Firmware parameters (always write them after the official ones, just before closing the parent tag)
 	writer.writeSyncTypeToFile(currentSong, "syncType", lfoConfig[LFO1_ID].syncType, false);
+	writeLFOExtraToFile(writer, lfoConfig[LFO1_ID]);
 	writer.closeTag();
 
 	writer.writeOpeningTagBeginning("lfo2");
@@ -4207,6 +4270,7 @@ void Sound::writeToFile(Serializer& writer, bool savingSong, ParamManager* param
 	// Community Firmware parameters
 	writer.writeAbsoluteSyncLevelToFile(currentSong, "syncLevel", lfoConfig[LFO2_ID].syncLevel, false);
 	writer.writeSyncTypeToFile(currentSong, "syncType", lfoConfig[LFO2_ID].syncType, false);
+	writeLFOExtraToFile(writer, lfoConfig[LFO2_ID]);
 	writer.closeTag();
 
 	writer.writeOpeningTagBeginning("lfo3");
@@ -4214,6 +4278,7 @@ void Sound::writeToFile(Serializer& writer, bool savingSong, ParamManager* param
 	writer.writeAbsoluteSyncLevelToFile(currentSong, "syncLevel", lfoConfig[LFO3_ID].syncLevel, false);
 	// Community Firmware parameters (always write them after the official ones, just before closing the parent tag)
 	writer.writeSyncTypeToFile(currentSong, "syncType", lfoConfig[LFO3_ID].syncType, false);
+	writeLFOExtraToFile(writer, lfoConfig[LFO3_ID]);
 	writer.closeTag();
 
 	writer.writeOpeningTagBeginning("lfo4");
@@ -4221,6 +4286,7 @@ void Sound::writeToFile(Serializer& writer, bool savingSong, ParamManager* param
 	// Community Firmware parameters
 	writer.writeAbsoluteSyncLevelToFile(currentSong, "syncLevel", lfoConfig[LFO4_ID].syncLevel, false);
 	writer.writeSyncTypeToFile(currentSong, "syncType", lfoConfig[LFO4_ID].syncType, false);
+	writeLFOExtraToFile(writer, lfoConfig[LFO4_ID]);
 	writer.closeTag();
 
 	if (synthMode == SynthMode::FM) {

@@ -26,6 +26,7 @@ enum class FilterMode {
 	TRANSISTOR_12DB,
 	TRANSISTOR_24DB,
 	TRANSISTOR_24DB_DRIVE, // filter logic relies on ladders being first and contiguous
+	VOWEL,                 // Formant filter (dsp/filter/formant.h) - LPF only, so it sits before the first HPF mode
 	SVF_BAND,              // first HPF mode
 	SVF_NOTCH,             // last LPF mode
 	HPLADDER,
@@ -54,10 +55,12 @@ FilterMode stringToLPFType(char const* string);
 
 namespace deluge::dsp::filter {
 
-enum class FilterFamily { LP_LADDER, SVF, HP_LADDER, NONE };
-constexpr uint8_t kNumFamilies = 3;
+enum class FilterFamily { LP_LADDER, VOWEL, SVF, HP_LADDER, NONE }; // Same order as the FilterMode values
+constexpr uint8_t kNumFamilies = 4;
 enum LpLadderType { LP12, LP24, DRIVE };
 constexpr uint8_t kNumLadders = 3;
+enum VowelType { VOWEL_FORMANT };
+constexpr uint8_t kNumVowelFilters = 1;
 enum SVFType { BAND, NOTCH };
 constexpr uint8_t kNumSVF = 2;
 enum HPFType { HP12 };
@@ -65,7 +68,7 @@ constexpr uint8_t kNumHPLadders = 1;
 
 using specificFilterType = uint8_t;
 // must match order of filter family declaration for indexing to work
-constexpr uint8_t numForVariant[kNumFamilies] = {kNumLadders, kNumSVF, kNumHPLadders};
+constexpr uint8_t numForVariant[kNumFamilies] = {kNumLadders, kNumVowelFilters, kNumSVF, kNumHPLadders};
 
 /// A filters family (types which can all share an implementation for toggling) and specific type within that family
 class SpecificFilter {
@@ -102,6 +105,10 @@ public:
 			family = FilterFamily::LP_LADDER;
 			type = LpLadderType::DRIVE;
 			break;
+		case FilterMode::VOWEL:
+			family = FilterFamily::VOWEL;
+			type = VowelType::VOWEL_FORMANT;
+			break;
 		}
 	}
 
@@ -118,6 +125,8 @@ public:
 			return l10n::String::STRING_FOR_FM;
 		case FilterFamily::SVF:
 			return shortName ? l10n::String::STRING_FOR_MORPH_SHORT : l10n::String::STRING_FOR_MORPH;
+		case FilterFamily::VOWEL:
+			return shortName ? l10n::String::STRING_FOR_VOWEL_SHIFT_SHORT : l10n::String::STRING_FOR_VOWEL_SHIFT;
 		default:
 			return l10n::String::STRING_FOR_NONE;
 		};

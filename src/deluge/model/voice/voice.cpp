@@ -176,6 +176,11 @@ bool Voice::noteOn(ModelStackWithSoundFlags* modelStack, int32_t newNoteCodeBefo
 
 		lastSaturationTanHWorkingValue[0] = 2147483648;
 		lastSaturationTanHWorkingValue[1] = 2147483648;
+		lastSaturationToneState[0] = 0;
+		lastSaturationToneState[1] = 0;
+		wavefoldState[0] = {};
+		wavefoldState[1] = {};
+		wavefoldDcBlockActive = false;
 	}
 
 	// Porta
@@ -996,9 +1001,18 @@ skipAutoRelease: {}
 	// Checking if filters should run now happens within the filterset
 	FilterMode lpfMode = doLPF ? sound.lpfMode : FilterMode::OFF;
 	FilterMode hpfMode = doHPF ? sound.hpfMode : FilterMode::OFF;
+	// The Vowel filter's formant shift takes its modulation added on, both ways around the knob - so an LFO sweeps the
+	// formants up and down even with the shift at 0. (LPF morph is a linear param: its cables multiply, which can never
+	// take it below the knob, and does nothing at all with the knob at 0.)
+	q31_t lpfMorph = paramFinalValues[params::LOCAL_LPF_MORPH];
+	if (lpfMode == FilterMode::VOWEL) {
+		lpfMorph = add_saturate(patcher.finalLinearValueWithoutCables(params::LOCAL_LPF_MORPH, sound, *paramManager),
+		                        patcher.sumCablesAdditively(params::LOCAL_LPF_MORPH, *paramManager));
+	}
+	filterSet.setVowelRaw(sound.vowelRaw);
 	filterGain = filterSet.setConfig(
-	    paramFinalValues[params::LOCAL_LPF_FREQ], paramFinalValues[params::LOCAL_LPF_RESONANCE], lpfMode,
-	    paramFinalValues[params::LOCAL_LPF_MORPH], paramFinalValues[params::LOCAL_HPF_FREQ],
+	    paramFinalValues[params::LOCAL_LPF_FREQ], paramFinalValues[params::LOCAL_LPF_RESONANCE], lpfMode, lpfMorph,
+	    paramFinalValues[params::LOCAL_HPF_FREQ],
 	    (paramFinalValues[params::LOCAL_HPF_RESONANCE]), // >> StorageManager::devVarA) << StorageManager::devVarA,
 	    hpfMode, paramFinalValues[params::LOCAL_HPF_MORPH], sound.volumeNeutralValueForUnison << 1, sound.filterRoute,
 	    false, nullptr); // Level adjustment for unison now happens *before* the filter!
@@ -1516,7 +1530,22 @@ skipUnisonPart: {}
 		int32_t* const oscBufferEnd = oscBuffer + (numSamples << 1);
 		// fold
 		if (paramFinalValues[params::LOCAL_FOLD] > 0) {
-			dsp::foldBufferPolyApproximation(oscBuffer, oscBufferEnd, paramFinalValues[params::LOCAL_FOLD]);
+			q31_t foldSymmetry = paramFinalValues[params::LOCAL_FOLD_SYMMETRY];
+			if (foldSymmetry != 0) {
+				wavefoldDcBlockActive = true;
+			}
+			if (foldSymmetry != 0 || sound.foldTone != 0 || wavefoldDcBlockActive) {
+				// Interleaved stereo: each channel keeps its own Tone crossover and DC blocker state.
+				dsp::foldBufferWithSymmetryAndTone(oscBuffer, oscBufferEnd, 2, paramFinalValues[params::LOCAL_FOLD],
+				                                   foldSymmetry, sound.foldTone, wavefoldDcBlockActive,
+				                                   wavefoldState[0]);
+				dsp::foldBufferWithSymmetryAndTone(oscBuffer + 1, oscBufferEnd, 2, paramFinalValues[params::LOCAL_FOLD],
+				                                   foldSymmetry, sound.foldTone, wavefoldDcBlockActive,
+				                                   wavefoldState[1]);
+			}
+			else {
+				dsp::foldBufferPolyApproximation(oscBuffer, oscBufferEnd, paramFinalValues[params::LOCAL_FOLD]);
+			}
 		}
 		// Filters
 		filterSet.renderLongStereo(oscBuffer, oscBufferEnd);
@@ -1568,8 +1597,10 @@ skipUnisonPart: {}
 					outputSampleR = multiply_32x32_rshift32_rounded(outputSampleR, overallOscAmplitudeNow) << 1;
 				}
 
-				sound.saturate(&outputSampleL, &lastSaturationTanHWorkingValue[0], shiftAmount);
-				sound.saturate(&outputSampleR, &lastSaturationTanHWorkingValue[1], shiftAmount);
+				sound.saturate(&outputSampleL, &lastSaturationTanHWorkingValue[0], shiftAmount,
+				               &lastSaturationToneState[0]);
+				sound.saturate(&outputSampleR, &lastSaturationTanHWorkingValue[1], shiftAmount,
+				               &lastSaturationToneState[1]);
 
 				// Write to the output buffer, panning or not
 				if (doPanning) {
@@ -1599,8 +1630,18 @@ skipUnisonPart: {}
 		// wavefolding pre filter
 		if (paramFinalValues[params::LOCAL_FOLD] > 0) {
 			q31_t foldAmount = paramFinalValues[params::LOCAL_FOLD];
+			q31_t foldSymmetry = paramFinalValues[params::LOCAL_FOLD_SYMMETRY];
+			if (foldSymmetry != 0) {
+				wavefoldDcBlockActive = true;
+			}
 
-			dsp::foldBufferPolyApproximation(oscBuffer, oscBufferEnd, foldAmount);
+			if (foldSymmetry != 0 || sound.foldTone != 0 || wavefoldDcBlockActive) {
+				dsp::foldBufferWithSymmetryAndTone(oscBuffer, oscBufferEnd, 1, foldAmount, foldSymmetry, sound.foldTone,
+				                                   wavefoldDcBlockActive, wavefoldState[0]);
+			}
+			else {
+				dsp::foldBufferPolyApproximation(oscBuffer, oscBufferEnd, foldAmount);
+			}
 		}
 
 		filterSet.renderLong(oscBuffer, oscBufferEnd, numSamples);
@@ -1650,7 +1691,8 @@ skipUnisonPart: {}
 					output = multiply_32x32_rshift32_rounded(output, overallOscAmplitudeNow) << 1;
 				}
 
-				sound.saturate(&output, &lastSaturationTanHWorkingValue[0], clippingAmount);
+				sound.saturate(&output, &lastSaturationTanHWorkingValue[0], clippingAmount,
+				               &lastSaturationToneState[0]);
 
 				if (soundRenderingInStereo) {
 					if (doPanning) {

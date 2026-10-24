@@ -104,7 +104,14 @@ public:
 	StutterConfig stutterConfig;
 
 	bool sampleRateReductionOnLastTime;
-	uint8_t clippingAmount; // Song probably doesn't currently use this?
+	uint8_t clippingAmount;     // Song probably doesn't currently use this? Saturation drive, 0-50
+	uint8_t clippingTweak = 25; // 0-50, Tanh Asymmetry amount
+	uint8_t clippingMix = 50;   // 0-50 dry/wet, 50 = fully wet (matches pre-existing behaviour)
+	uint8_t clippingTone = 0;   // 0-50, pre-saturation clean-lowend crossover amount, 0 = bypassed
+	uint8_t foldTone = 0;       // 0-50, clean-lowend crossover before the wavefolder (Sound only), 0 = bypassed
+	uint8_t vowelRaw = 0;       // 0-50, Vowel filter: the source's own highs mixed back in, 0 = off
+	/// Loading only: clippingAmount as the file had it (see readTagFromFile() - old files use 0-15 steps)
+	uint8_t clippingAmountAsSaved = 0;
 	FilterMode lpfMode;
 	FilterMode hpfMode;
 	FilterRoute filterRoute;

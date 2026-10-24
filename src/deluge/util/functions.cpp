@@ -778,6 +778,8 @@ char const* lfoTypeToString(LFOType oscType) {
 		return "rwalk";
 	case LFOType::WARBLER:
 		return "warbler";
+	case LFOType::CUSTOM:
+		return "custom";
 	default:
 		return "triangle";
 	}
@@ -798,6 +800,9 @@ LFOType stringToLFOType(char const* string) {
 	}
 	else if (!strcmp(string, "warbler")) {
 		return LFOType::WARBLER;
+	}
+	else if (!strcmp(string, "custom")) {
+		return LFOType::CUSTOM;
 	}
 	else if (!strcmp(string, "rwalk")) {
 		return LFOType::RANDOM_WALK;

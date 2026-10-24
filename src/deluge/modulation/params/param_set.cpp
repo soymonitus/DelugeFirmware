@@ -558,6 +558,7 @@ int32_t PatchedParamSet::knobPosToParamValue(int32_t knobPos, ModelStackWithAuto
 bool PatchedParamSet::shouldParamIndicateMiddleValue(ModelStackWithParamId const* modelStack) {
 	switch (modelStack->paramId) {
 	case params::LOCAL_PAN:
+	case params::LOCAL_FOLD_SYMMETRY:
 	case params::LOCAL_PITCH_ADJUST:
 	case params::LOCAL_OSC_A_PITCH_ADJUST:
 	case params::LOCAL_OSC_B_PITCH_ADJUST:

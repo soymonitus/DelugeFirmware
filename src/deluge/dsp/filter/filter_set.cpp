@@ -48,6 +48,9 @@ q31_t tempRenderBuffer[SSI_TX_BUFFER_NUM_SAMPLES * 2]; // * 2 to accomodate ster
 		if ((lpfMode_ == FilterMode::SVF_BAND) || (lpfMode_ == FilterMode::SVF_NOTCH)) {
 			lpfilter.svf.filterMono(startSample, endSample, sampleIncrement);
 		}
+		else if (lpfMode_ == FilterMode::VOWEL) {
+			lpfilter.formant.filterMono(startSample, endSample, sampleIncrement);
+		}
 		else {
 			lpfilter.ladder.filterMono(startSample, endSample, sampleIncrement);
 		}
@@ -59,6 +62,9 @@ q31_t tempRenderBuffer[SSI_TX_BUFFER_NUM_SAMPLES * 2]; // * 2 to accomodate ster
 		if ((lpfMode_ == FilterMode::SVF_BAND) || (lpfMode_ == FilterMode::SVF_NOTCH)) {
 
 			lpfilter.svf.filterStereo(startSample, endSample);
+		}
+		else if (lpfMode_ == FilterMode::VOWEL) {
+			lpfilter.formant.filterStereo(startSample, endSample);
 		}
 		else {
 
@@ -149,6 +155,13 @@ int32_t FilterSet::setConfig(q31_t lpfFrequency, q31_t lpfResonance, FilterMode 
 				lpfilter.svf.reset(lastLPFMode_ == FilterMode::OFF);
 			}
 			filterGain = lpfilter.svf.configure(lpfFrequency, lpfResonance, lpfMode_, lpfMorph, filterGain);
+		}
+		else if (lpfMode_ == FilterMode::VOWEL) {
+			if (SpecificFilter(lastLPFMode_).getFamily() != FilterFamily::VOWEL) {
+				lpfilter.formant.reset(lastLPFMode_ == FilterMode::OFF);
+			}
+			lpfilter.formant.setRaw(vowelRaw_);
+			filterGain = lpfilter.formant.configure(lpfFrequency, lpfResonance, lpfMode_, lpfMorph, filterGain);
 		}
 		else {
 			if (SpecificFilter(lastLPFMode_).getFamily() != FilterFamily::LP_LADDER) {
